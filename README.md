@@ -14,10 +14,8 @@ This framework provides an end-to-end solution for training, evaluating, and dep
 
 ## Table of Contents
 
-- [Prerequisites](#prerequisites)
+- [System Requirements](#system-requirements)
 - [Architecture & Design Decisions](#architecture-decisions)
-- [Quick Start & Installation](#quick-start)
-- [Dataset Preparation](#dataset-preparation)
 - [Model Architecture](#model-architecture)
 - [Training Pipeline](#training-pipeline)
 - [Evaluation & Metrics](#evaluation-metrics)
@@ -25,32 +23,55 @@ This framework provides an end-to-end solution for training, evaluating, and dep
 - [Configuration Guide](#configuration-guide)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
+- [Acknowledgements](#acknowledgements)
 
 ---
 
-## Prerequisites <a id="prerequisites"></a>
+## System Requirements <a id="system-requirements"></a>
 
-> [!CAUTION]
->
-> ### GPU Requirements
-> Training video models requires significant GPU memory. Recommended specifications:
->
-> - **Minimum**: NVIDIA GPU with 8GB VRAM (for IQA tasks)
->
-> - **Recommended**: NVIDIA GPU with 24GB+ VRAM (for VQA tasks)
->
-> - **Alternative**: Use CPU mode with `device: "cpu"` in config (significantly slower)
+### Hardware Requirements
 
-> [!WARNING]
-> ### Dataset Storage
-> The framework expects datasets in the following structure:
->
-> ```text
-> datasets/
-> ├── TID2013/          # ~3GB (image dataset)
-> ├── KoNViD-1k/        # ~10GB (video dataset)
-> └── T2VQA-DB/         # ~50GB (video dataset)
-> ```
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| **GPU** | 8GB VRAM (IQA only) | 24GB+ VRAM (VQA training) |
+| **RAM** | 16GB | 32GB+ |
+| **Disk Space** | 50GB | 200GB+ (including datasets) |
+| **CPU** | 4 cores | 8+ cores |
+
+### Software Requirements
+
+| Component | Version | Notes |
+|-----------|---------|-------|
+| **OS** | Linux (Ubuntu 20.04+) / Windows 10+ / macOS 12+ | Linux recommended for training |
+| **Python** | 3.10 - 3.12 | 3.12+ not fully tested |
+| **CUDA** | 11.8 / 12.1 | Required for GPU training |
+| **PyTorch** | 2.0+ | 2.5+ recommended for better AMP support |
+| **cuDNN** | 8.7+ | Included with PyTorch |
+
+### Storage Breakdown
+
+The framework expects datasets in the following structure:
+
+| Dataset | Size (Compressed) | Size (Extracted) |
+|---------|-------------------|-------------------|
+| TID2013 | ~500MB | ~3GB |
+| KoNViD-1k | ~9GB | ~10GB |
+| T2VQA-DB | ~45GB | ~50GB+ |
+| **Total** | **~55GB** | **~63GB+** |
+
+### Additional Space
+
+| Item | Estimated Size |
+|------|----------------|
+| Python environment (uv/venv) | ~5GB |
+| Model checkpoints (5-fold) | ~10GB |
+| Training logs & plots | ~2GB |
+| **Grand Total** | **~80-100GB** |
+
+> [!NOTE]
+> - Use `uv` for faster installation and smaller dependency footprint
+> - Symbolic links (see below) do not consume additional disk space
+> - `quarantine/` directory may grow if files are isolated; run `scripts/cache_clean.sh` regularly
 
 ---
 
@@ -71,105 +92,6 @@ The framework implements a dimension-aware routing system that automatically swi
 | **Multi-Dataset Support** | YAML-based configuration with factory pattern | Easy addition of new datasets without code changes |
 | **Path Abstraction** | DSL-based `PathManager` with YAML routing | Eliminates hardcoded paths, supports symbolic links |
 | **Lazy Asset Resolution** | `CaseInsensitiveAssetResolver` with pre-built index | O(1) file lookup, case-insensitive matching |
-
----
-
-## Quick Start & Installation <a id="quick-start"></a>
-
-### 1. Clone Repository
-
-```bash
-git clone https://github.com/yourname/deep-vqa-framework.git
-cd deep-vqa-framework
-```
-
-### 2. Environment Setup
-
-- **Using uv (Recommended)**
-
-```bash
-# Install uv if not already installed
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Create virtual environment and install dependencies
-uv venv
-source .venv/bin/activate  # Linux/macOS
-# .venv\Scripts\activate   # Windows
-uv pip install -e .
-```
-
-- **Using pip**
-
-```bash
-python -m venv venv
-source venv/bin/activate
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-pip install -r requirements.txt
-```
-
-### 3. Verify Installation
-
-```bash
-python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
-```
-
----
-
-## Dataset Preparation <a id="dataset-preparation"></a>
-
-### Automatic Download & Extraction
-
-```bash
-# Run the data management script
-bash scripts/manage_data.sh
-```
-
-This script automatically:
-
-- Searches for existing datasets in common locations
-
-- Downloads missing datasets via aria2/gdown
-
-- Extracts archives and creates symbolic links
-
-### Manual Setup
-
-**TID2013** (Image Quality Assessment)
-
-```bash
-# Download from: http://www.ponomarenko.info/tid2013/tid2013.rar
-# Extract to: datasets/TID2013/
-```
-
-**KoNViD-1k** (Video Quality Assessment)
-
-```bash
-# Videos: https://datasets.vqa.mmsp-kn.de/archives/KoNViD_1k_videos.zip
-# Metadata: https://datasets.vqa.mmsp-kn.de/archives/KoNViD_1k_metadata.zip
-# Extract to: datasets/KoNViD-1k/
-```
-
-**T2VQA-DB** (Text-to-Video Quality Assessment)
-
-```bash
-# Download from Google Drive (see dataset_config.yaml for URL)
-# Extract to: datasets/T2VQA-DB/
-```
-
-### Dataset Configuration
-
-Configure dataset paths and metadata in `config/dataset_config.yaml`:
-
-```yaml
-tid2013:
-  data_type: "image"
-  file_extensions: ["bmp"]
-  metadata:
-    mos_file: "mos_with_names.txt"
-  split:
-    train_ratio: 0.8
-    val_ratio: 0.1
-```
 
 ---
 
@@ -201,7 +123,7 @@ Output: Quality Score (0-1 range)
 
 ### Loss Function: Hybrid MSE + Rank Loss
 
-```python
+```text
 Total Loss = 0.7 × MSE + 0.3 × Rank Loss
 
 - MSE Loss: Absolute prediction accuracy
@@ -279,12 +201,6 @@ uv run python -m src.main --model resnet_iqa --dataset tid2013 --smoke_test
 ```
 
 - **Debug Mode (with breakpoints)**
-
-```bash
-DEBUG=1 uv run python -m src.main --model resnet_iqa --dataset tid2013
-```
-
-Or you can:
 
 ```bash
 LOG_LEVEL=DEBUG uv run python -m src.main --model resnet_iqa --dataset tid2013
@@ -399,32 +315,29 @@ deep-vqa-framework/
 │   └── system_check.sh             # GPU, CUDA, dependency validation, etc
 │
 ├── src/
- ├── main.py                     # Entry point: training & evaluation
- ├── core/
- │   ├── engine.py               # Training/validation loop
- │   ├── evaluator.py            # Metrics computation (PLCC, SROCC)
- │   └── trainer.py              # Cross-validation pipeline
- ├── data/
- │   ├── data_eda.py             # Exploratory data analysis
- │   ├── metadata_loader_factory.py  # Factory for dataset parsers
- │   ├── metadata_loaders.py     # Dataset-specific metadata loaders
- │   ├── types.py                # Type definitions (dataclasses)
- │   └── eda/
- │       ├── integrity.py        # Dataset integrity validation
- │       ├── metrics_plotter.py  # Visualization generators
- │       ├── split.py            # Train/val/test splitting
- │       └── statistics.py       # Statistical analysis
- ├── models/
- │   ├── README.md               # Model architecture documentation
- │   └── iqavqa_net.py           # Unified IQA/VQA network
- ├── utils/
- │   ├── config_loader.py        # YAML config loading & merging
- │   ├── file_loader.py          # Asset resolution (case-insensitive)
- │   ├── logging_utils.py        # Logging configuration
- │   └── path_manager.py         # DSL-based path abstraction
- └── results/
-     ├── *_integrity_report.txt  # Dataset validation reports
-     └── plots/                  # EDA-generated plots (directory)
+│   ├── main.py                     # Entry point: training & evaluation
+│   ├── core/
+│   │   ├── engine.py               # Training/validation loop
+│   │   ├── evaluator.py            # Metrics computation (PLCC, SROCC)
+│   │   └── trainer.py              # Cross-validation pipeline
+│   ├── data/
+│   │   ├── data_eda.py             # Exploratory data analysis
+│   │   ├── metadata_loader_factory.py  # Factory for dataset parsers
+│   │   ├── metadata_loaders.py     # Dataset-specific metadata loaders
+│   │   ├── types.py                # Type definitions (enums, dataclasses)
+│   │   └── eda/
+│   │       ├── integrity.py        # File integrity check (missing/corrupted)
+│   │       ├── metrics_plotter.py  # Training curves, residuals, comparison
+│   │       ├── split.py            # Stratified K-Fold splitting
+│   │       └── statistics.py       # MOS distribution, resolution stats
+│   ├── models/
+│   │   ├── README.md               # Model architecture documentation
+│   │   └── iqavqa_net.py           # Unified IQA/VQA network
+│   └── utils/
+│       ├── config_loader.py        # YAML config loading & deep merging
+│       ├── file_loader.py          # Case-insensitive file path resolver
+│       ├── logging_utils.py        # Logging with CSV rotation
+│       └── path_manager.py         # Path routing with YAML templates
 ```
 
 ---
@@ -433,9 +346,13 @@ deep-vqa-framework/
 
 ### Configuration Layering
 
-1. **`basic.yaml`** - Global defaults (system, training, evaluation)
-2. **`models/{model}.yaml`** - Model-specific overrides
-3. **`dataset_config.yaml`** - Dataset-specific settings
+Configuration files are merged in the following order (later files override earlier ones):
+
+| Layer | File | Purpose |
+| ------- | ------ | --------- |
+| 1 (Base) | `basic.yaml` | Global defaults |
+| 2 (Model) | `models/{model}.yaml` | Model-specific overrides |
+| 3 (Dataset) | `dataset_config.yaml` | Dataset-specific settings |
 
 ### Memory Optimization for Video Training
 
@@ -453,15 +370,6 @@ model:
 train:
   gradient_accumulation_steps: 4  # Simulate larger batch
   amp: true                  # Enable mixed precision
-```
-
-### Symlink Setup for Datasets
-
-```bash
-cd datasets
-ln -s TID2013 tid2013        # Case-insensitive access
-ln -s KoNViD-1k konvid-1k
-ln -s T2VQA-DB t2vqa-db
 ```
 
 ---
@@ -493,7 +401,7 @@ ls -la
 
 ### Video Loading Backend (AutoDL Specific)
 
-[!WARNING]
+> [!WARNING]
 On AutoDL or similar cloud GPU instances, OpenCV's VideoCapture may fail due to missing system dependencies.
 
 Solution: Use Decord
@@ -518,11 +426,11 @@ Decord is pre-configured as the default backend. If Decord is not available, the
 
 - **Framework**: [MIT](LICENSE)
 - **Author**: [@autentisitet](https://github.com/autentisitet)
-- **Version**: 0.9.0
+- **Version**: 0.9.1
 
 ---
 
-## 🙏 Acknowledgments
+## 🙏 Acknowledgments <a id="acknowledments"></a>
 
 - PyTorch team for deep learning framework
 - Decord developers for efficient video loading
