@@ -10,6 +10,9 @@
 
 This framework provides an end-to-end solution for training, evaluating, and deploying quality assessment models. It features a unified architecture that seamlessly handles both image and video inputs, multi-dataset support, cross-validation pipelines, and production-ready inference APIs.
 
+> [!NOTE]
+> This framework is primarily tested on AutoDL cloud GPU instances.
+
 ---
 
 ## Table of Contents
@@ -426,7 +429,7 @@ Decord is pre-configured as the default backend. If Decord is not available, the
 
 - **Framework**: [MIT](LICENSE)
 - **Author**: [@autentisitet](https://github.com/autentisitet)
-- **Version**: 0.9.1
+- **Version**: 0.9.1 (pre-release)
 
 ---
 
