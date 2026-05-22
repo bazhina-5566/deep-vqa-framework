@@ -40,7 +40,7 @@ This framework provides an end-to-end solution for training, evaluating, and dep
 > - **Recommended**: NVIDIA GPU with 24GB+ VRAM (for VQA tasks)
 >
 > - **Alternative**: Use CPU mode with `device: "cpu"` in config (significantly slower)
->
+
 > [!WARNING]
 > ### Dataset Storage
 > The framework expects datasets in the following structure:
@@ -338,13 +338,13 @@ Output location: `results/{dataset}/plots/`
 
 ```text
 deep-vqa-framework/
-├── Algorithm-section.png          # Architecture diagram for documentation
+├── Algorithm-section.png           # Architecture diagram for documentation
 ├── Makefile                        # Automation commands (training, clean, test)
 ├── README.md                       # Project documentation (this file)
 ├── pyproject.toml                  # Python project configuration (uv/pip)
 ├── uv.lock                         # Lock file for dependency versions
 │
-├── config/                         # YAML configuration files
+├── config/
 │   ├── basic.yaml                  # Global defaults (system, training)
 │   ├── dataset_config.yaml         # Dataset-specific settings & metadata
 │   ├── paths.yaml                  # Path routing & symbolic link rules
@@ -353,7 +353,7 @@ deep-vqa-framework/
 │       ├── resnet_vqa.yaml         # ResNet50 for Video QA
 │       └── timeswin_vqa.yaml       # TimeSwin transformer for Video QA
 │
-├── datasets/                       # Dataset storage (symlinks to actual data)
+├── datasets/
 │   ├── KoNViD-1k/                  # KoNViD-1k dataset (videos + metadata)
 │   │   ├── KoNViD-1k_metadata/     # MOS scores and video annotations
 │   │   └── KoNViD-1k_videos/       # Video files (directory only)
@@ -373,13 +373,13 @@ deep-vqa-framework/
 │   ├── t2vqa-db -> T2VQA-DB        # Symlink for case-insensitive access
 │   └── tid2013 -> TID2013          # Symlink for case-insensitive access
 │
-├── docs/                           # Documentation assets
+├── docs/
 │   ├── Algorithm-section.mmd       # Mermaid diagram source
 │   └── Cloud_Platform_Rental_Guide.md  # Cloud setup instructions
 │
 ├── quarantine/                     # Isolated directory for testing/archiving
 │
-├── results/                        # All training outputs and logs
+├── results/
 │   ├── scripts_logs/               # Script execution logs (directory)
 │   ├── model_outputs/              # Global model checkpoints (directory)
 │   ├── train_logs/                 # Global training history (directory)
@@ -391,41 +391,41 @@ deep-vqa-framework/
 │   ├── konvid-1k/                  # Video dataset results (directory)
 │   └── t2vqa-db/                   # T2VQA dataset results (directory)
 │
-├── scripts/                        # Utility shell scripts
+├── scripts/
 │   ├── archive_result.sh           # Archive old results to quarantine
-│   ├── cache_clean.sh              # Clear Python cache files
+│   ├── cache_clean.sh              # Clear system cache files, etc
 │   ├── download_flag               # Flag file for download completion
 │   ├── manage_data.sh              # Dataset download & extraction
-│   ├── network_control.sh          # Network proxy configuration
-│   ├── plugin.sh                   # Plugin management
+│   ├── network_control.sh          # Network proxy configuration, etc
+│   ├── plugin.sh                   # Symlink creation
 │   ├── setup_env.sh                # Environment initialization
-│   └── system_check.sh             # GPU, CUDA, dependency validation
+│   └── system_check.sh             # GPU, CUDA, dependency validation, etc
 │
-├── src/                            # Source code root
+├── src/
 │   ├── main.py                     # Entry point: training & evaluation
-│   ├── core/                       # Core training components
+│   ├── core/
 │   │   ├── engine.py               # Training/validation loop
 │   │   ├── evaluator.py            # Metrics computation (PLCC, SROCC)
 │   │   └── trainer.py              # Cross-validation pipeline
-│   ├── data/                       # Data handling module
+│   ├── data/
 │   │   ├── data_eda.py             # Exploratory data analysis
 │   │   ├── metadata_loader_factory.py  # Factory for dataset parsers
 │   │   ├── metadata_loaders.py     # Dataset-specific metadata loaders
 │   │   ├── types.py                # Type definitions (dataclasses)
-│   │   └── eda/                    # EDA submodules
+│   │   └── eda/
 │   │       ├── integrity.py        # Dataset integrity validation
 │   │       ├── metrics_plotter.py  # Visualization generators
 │   │       ├── split.py            # Train/val/test splitting
 │   │       └── statistics.py       # Statistical analysis
-│   ├── models/                     # Model definitions
+│   ├── models/
 │   │   ├── README.md               # Model architecture documentation
 │   │   └── iqavqa_net.py           # Unified IQA/VQA network
-│   ├── utils/                      # Utility functions
+│   ├── utils/
 │   │   ├── config_loader.py        # YAML config loading & merging
 │   │   ├── file_loader.py          # Asset resolution (case-insensitive)
 │   │   ├── logging_utils.py        # Logging configuration
 │   │   └── path_manager.py         # DSL-based path abstraction
-│   └── results/                    # Runtime-generated reports
+│   └── results/
 │       ├── *_integrity_report.txt  # Dataset validation reports
 │       └── plots/                  # EDA-generated plots (directory)
 
@@ -482,22 +482,31 @@ ln -s T2VQA-DB t2vqa-db
 
 ### Dataset Not Found
 
-```bash
-# Check symlinks
-ls -la datasets/
-# Create missing symlinks
-ln -s ACTUAL_NAME symlink_name
-```
-
-### Missing Dependencies
+If you encounter `FileNotFoundError` when passing `--dataset xxx`, it means the dataset symlink is missing or incorrect.
 
 ```bash
-# Decord for fast video loading
-uv pip install decord
+cd datasets
+ls -la
 
-# OpenCV fallback (always available)
-uv pip install opencv-python
+ln -s TID2013 tid2013
+ln -s KoNViD-1k konvid-1k
+ln -s T2VQA-DB t2vqa-db
+
+ls -la
 ```
+
+### Video Loading Backend (AutoDL Specific)
+
+[!WARNING]
+On AutoDL or similar cloud GPU instances, OpenCV's VideoCapture may fail due to missing system dependencies.
+
+Solution: Use Decord
+
+```bash
+uv add decord
+```
+Decord is pre-configured as the default backend. If Decord is not available, the framework automatically falls back to OpenCV, but on AutoDL this fallback may fail. Always use Decord for video training on AutoDL.
+
 
 ### Slow Training
 
@@ -511,7 +520,7 @@ uv pip install opencv-python
 
 ## 📄 License <a id="license"></a>
 
-- **Framework**: MIT(LICENSE)
+- **Framework**: [MIT](LICENSE)
 - **Author**: [@autentisitet](https://github.com/autentisitet)
 - **Version**: 0.9.0
 
