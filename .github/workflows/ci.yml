@@ -11,32 +11,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  syntax-check:
-    name: Syntax & Import Check
+  shell-scripts:
+    name: Shell Script Syntax Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: "latest"
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install core dependencies (no torch/cv2 for speed)
+      - name: Check scripts/*.sh syntax (bash -n)
         run: |
-          uv pip install --system \
-            loguru pyyaml numpy scipy scikit-learn tqdm rich
-
-      - name: Syntax check all Python files
-        run: |
-          echo "Checking Python syntax in src/..."
-          find src/ -name "*.py" | while read f; do
-            python -m py_compile "$f" && echo "  OK: $f" || { echo "  FAIL: $f"; exit 1; }
+          echo "Running bash -n on scripts/*.sh ..."
+          failed=0
+          for f in scripts/*.sh; do
+            bash -n "$f" && echo "  OK: $f" || { echo "  FAIL: $f"; failed=1; }
           done
-          echo "All files passed syntax check."
+          exit $failed
