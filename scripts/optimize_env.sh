@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# --- network_control.sh ---
+# --- optimize_env.sh ---
 
 # Tasks:
 # 1. release ports

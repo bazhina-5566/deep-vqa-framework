@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Deep-VQA-Framework Architecture</title>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        import svgPanZoom from 'https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/+esm';
+
+        mermaid.initialize({ startOnLoad: false, theme: 'default' });
+
+        window.onload = async () => {
+            await mermaid.run();
+            const svgElement = document.querySelector('.mermaid svg');
+            svgElement.setAttribute('width', '100%');
+            svgElement.setAttribute('height', '100%');
+
+            // 彻底禁用控制图标 (controlIconsEnabled: false)
+            svgPanZoom(svgElement, {
+                zoomEnabled: true,
+                controlIconsEnabled: false,
+                fit: true,
+                center: true,
+                minZoom: 0.5,
+                maxZoom: 10
+            });
+        };
+    </script>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #f4f4f9; overflow: hidden; }
+        .mermaid { width: 100vw; height: 100vh; }
+    </style>
+</head>
+<body>
+    <div class="mermaid">
+    graph TD
+        classDef transitionLink stroke:#d32f2f,stroke-width:5px,stroke-dasharray:5;
+
+        subgraph STAGE_1 [1. 基础设施 - 脚本层]
+            S1[setup_env.sh] --> S2[system_check.sh]
+            S2 --> S3[manage_data.sh]
+            S3 --> S4[optimize_env.sh]
+            S5[cache_clean.sh] -.-> S3
+        end
+        subgraph STAGE_2 [2. 配置驱动 - 参数层]
+            C1[basic.yaml] --> M[main.py]
+            C2[dataset_config.yaml] --> M
+            C3[models/*.yaml] --> M
+        end
+        subgraph STAGE_3 [3. 控制中枢 - 入口层]
+            M --> T[trainer.py]
+            T --> U[paths.yaml + src/utils/*.py]
+        end
+        subgraph STAGE_4 [4. 核心执行 - 逻辑层]
+            T --> E[engine.py]
+            E --> D[src/data/eda/*.py]
+            E --> N{iqavqa_net.py}
+            E --> EV[evaluator.py]
+            EV --> MP[metrics_plotter.py]
+            MP --> T
+        end
+        subgraph STAGE_5 [5. 成果归档 - 存储层]
+            T --> F[best_model.pt]
+            T --> AR[archive_result.sh]
+            AR --> LOG[(Log + Config + Plots + Weights)]
+        end
+        subgraph STAGE_6 [6. 推理部署 - 交付层]
+            F --> INF[inference.py]
+            INF --> W[wrapper.py]
+            W --> U2[外部应用调用]
+        end
+
+        STAGE_1 ==> STAGE_2
+        STAGE_2 ==> STAGE_3
+        STAGE_3 ==> STAGE_4
+        STAGE_4 ==> STAGE_5
+        STAGE_5 ==> STAGE_6
+
+        class STAGE_1,STAGE_2,STAGE_3,STAGE_4,STAGE_5,STAGE_6 transitionLink
+
+        style STAGE_1 fill:#f5f5f5,stroke:#333
+        style STAGE_2 fill:#e1f5fe,stroke:#01579b
+        style STAGE_3 fill:#fff9c4,stroke:#fbc02d
+        style STAGE_4 fill:#e8f5e9,stroke:#2e7d32
+        style STAGE_5 fill:#fce4ec,stroke:#c2185b
+        style STAGE_6 fill:#ede7f6,stroke:#512da8
+        style F fill:#ff9800,stroke:#e65100,stroke-width:4px
+    </div>
+</body>
+</html>

@@ -5,12 +5,18 @@
 set -e
 
 # --- 1. Physical path auto-detection ---
-BASE_DIR=$(cd "$(dirname "$0")"; pwd)
+# BASE_DIR=$(cd "$(dirname "$0")"; pwd)
+BASE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SCRIPT_NAME=$(basename "$0")
 
 PROJECT_ROOT=$(cd "$BASE_DIR/.."; pwd)
 RESULTS_DIR="${PROJECT_ROOT}/results"
+
+
 TIMESTAMP=$(date +%m%d_%H%M)
+SAVE_DIR="$PROJECT_ROOT/archives"
+SAVE_NAME="${SAVE_DIR}/EXP_RESULTS_${TIMESTAMP}.tar.gz"
+mkdir -p "$SAVE_DIR"
 
 # Default flags
 PACK_LOGS=false
@@ -119,11 +125,10 @@ if [ ${#PACK_LIST[@]} -eq 0 ]; then
 fi
 
 # Generate archive name
-SAVE_NAME="EXP_RESULTS_${TIMESTAMP}.tar.gz"
 echo "=========================================="
 echo "📦 Packaging mode: ${PACK_NAMES[@]}"
 echo "📂 Project root: $PROJECT_ROOT"
-echo "🚀 Output file: $BASE_DIR/$SAVE_NAME"
+echo "🚀 Output file: $SAVE_NAME"
 echo "=========================================="
 echo "Precisely archiving selected subdomains from results/..."
 
@@ -131,14 +136,14 @@ tar --exclude='*__pycache__*' \
     --exclude='*.pyc' \
     --exclude='*.tmp' \
     --exclude='.DS_Store' \
-    -czf "$BASE_DIR/$SAVE_NAME" \
+    -czf "$SAVE_NAME" \
     "${PACK_LIST[@]}" \
     --ignore-failed-read
 
 if [ $? -eq 0 ]; then
     echo "------------------------------------------"
-    echo "✅ Archive successful -> $BASE_DIR/$SAVE_NAME"
-    echo "📊 Package size: $(du -h "$BASE_DIR/$SAVE_NAME" | cut -f1)"
+    echo "✅ Archive successful -> $SAVE_NAME"
+    echo "📊 Package size: $(du -h "$SAVE_NAME" | cut -f1)"
     echo "📁 Assets included: ${PACK_NAMES[@]}"
     echo "------------------------------------------"
 else

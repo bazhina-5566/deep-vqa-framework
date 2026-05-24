@@ -5,7 +5,6 @@
 
 datasets/
 results/
-docs/
 api/
 config-bak/
 quarantine/
@@ -13,8 +12,7 @@ quarantine/
 scripts/download_flag
 nohup.out
 checkup.md
-train.log
-Algorithm-section.png
+
 
 .venv/
 venv/

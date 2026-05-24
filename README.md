@@ -5,7 +5,7 @@
 [![GitHub release](https://img.shields.io/github/v/release/autentisitet/deep-vqa-framework?include_prereleases)](https://github.com/autentisitet/deep-vqa-framework/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-blue)](https://github.com/autentisitet/deep-vqa-framework)
-[![Version](https://img.shields.io/badge/version-0.9.1--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
+[![Version](https://img.shields.io/badge/version-0.9.2--beta-blue.svg)](https://github.com/autentisitet/deep-vqa-framework)
 
 **A Unified Deep Learning Framework for Image Quality Assessment (IQA) and Video Quality Assessment (VQA).**
 
@@ -24,6 +24,7 @@ This framework provides an end-to-end solution for training, evaluating, and dep
 - [Training Pipeline](#training-pipeline)
 - [Evaluation & Metrics](#evaluation-metrics)
 - [Project Structure](#project-structure)
+- [System Overview](#system-overview)
 - [Configuration Guide](#configuration-guide)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
@@ -143,12 +144,14 @@ Total Loss = 0.7 × MSE + 0.3 × Rank Loss
 #### Step 1: Create symbolic links
 
 ```bash
-cd datasets
-ln -s TID2013 tid2013
-ln -s KoNViD-1k konvid-1k
-ln -s T2VQA-DB t2vqa-db
+make link
+```
 
-ls -la
+or you can:
+
+```bash
+cd scripts
+bash setup_links.sh
 ```
 
 #### Step 2: Run training
@@ -159,16 +162,34 @@ ls -la
 uv run python -m src.main --model resnet_iqa --dataset tid2013
 ```
 
+or you can:
+
+```bash
+make train DATASET=tid2013 MODEL=resnet_iqa DEBUG=0
+```
+
 - **Video Dataset (KoNViD-1k)**
 
 ```bash
 uv run python -m src.main --model timeswin_vqa --dataset konvid-1k
 ```
 
+or you can:
+
+```bash
+make train DATASET=konvid-1k MODEL=timeswin_vqa DEBUG=0
+```
+
 - **Video Dataset (T2VQA-DB)**
 
 ```bash
 uv run python -m src.main --model resnet_vqa --dataset t2vqa-db
+```
+
+or you can:
+
+```bash
+make train DATASET=t2vqa-db MODEL=resnet_vqa DEBUG=0
 ```
 
 ### Configuration Parameters
@@ -204,17 +225,35 @@ train:
 uv run python -m src.main --model resnet_iqa --dataset tid2013 --smoke_test
 ```
 
+or you can:
+
+```bash
+make test DATASET=tid2013 MODEL=resnet_iqa
+```
+
 - **Debug Mode (with breakpoints)**
 
 ```bash
 LOG_LEVEL=DEBUG uv run python -m src.main --model resnet_iqa --dataset tid2013
 ```
 
+or you can:
+
+```bash
+make train DATASET=tid2013 MODEL=resnet_iqa DEBUG=1
+```
+
 - **Background Training**
 
 ```bash
-nohup python -m src.main --model resnet_vqa --dataset t2vqa-db > train.log 2>&1 &
-tail -f train.log
+nohup python -m src.main --model resnet_vqa --dataset t2vqa-db > results/scripts_logs/train.log 2>&1 &
+tail -f results/scripts_logs/train.log
+```
+
+or you can:
+
+```bash
+make train DATASET=t2vqa-db MODEL=resnet_vqa DEBUG=1
 ```
 
 ---
@@ -255,9 +294,9 @@ Output location: `results/{dataset}/plots/`
 
 ```text
 deep-vqa-framework/
-├── Algorithm-section.png           # Architecture diagram for documentation
 ├── Makefile                        # Automation commands (training, clean, test)
 ├── README.md                       # Project documentation (this file)
+├── DISCLAIMER.md                       # Legal liability, data usage, and resource risks
 ├── pyproject.toml                  # Python project configuration (uv/pip)
 ├── uv.lock                         # Lock file for dependency versions
 │
@@ -291,8 +330,9 @@ deep-vqa-framework/
 │   └── tid2013 -> TID2013          # Symlink for case-insensitive access
 │
 ├── docs/
-│   ├── Algorithm-section.mmd       # Mermaid diagram source
-│   └── Cloud_Platform_Rental_Guide.md  # Cloud setup instructions
+│   ├── pipeline.html                  # Interactive system architecture map
+│   ├── pipeline.png                   # Static architecture overview
+│   └── Cloud_Platform_Rental_Guide.md # Cloud setup instructions
 │
 ├── quarantine/                     # Isolated directory for testing/archiving
 │
@@ -313,8 +353,8 @@ deep-vqa-framework/
 │   ├── cache_clean.sh              # Clear system cache files, etc
 │   ├── download_flag               # Flag file for download completion
 │   ├── manage_data.sh              # Dataset download & extraction
-│   ├── network_control.sh          # Network proxy configuration, etc
-│   ├── plugin.sh                   # Symlink creation
+│   ├── optimize_env.sh             # Network proxy configuration, etc
+│   ├── setup_links.sh              # Symlink creation
 │   ├── setup_env.sh                # Environment initialization
 │   └── system_check.sh             # GPU, CUDA, dependency validation, etc
 │
@@ -343,6 +383,15 @@ deep-vqa-framework/
 │       ├── logging_utils.py        # Logging with CSV rotation
 │       └── path_manager.py         # Path routing with YAML templates
 ```
+
+---
+
+## System Overview <a id="system-overview"></a>
+
+For a detailed look at the system architecture and execution flow, we provide two viewing options:
+
+[**Interactive Architecture Map**](docs/pipeline.html)
+[**Static Architecture Overview**](docs/pipeline.png)
 
 ---
 
@@ -393,14 +442,14 @@ train:
 If you encounter `FileNotFoundError` when passing `--dataset xxx`, it means the dataset symlink is missing or incorrect.
 
 ```bash
-cd datasets
-ls -la
+make link
+```
 
-ln -s TID2013 tid2013
-ln -s KoNViD-1k konvid-1k
-ln -s T2VQA-DB t2vqa-db
+or you can:
 
-ls -la
+```bash
+cd scripts
+bash setup_links.sh
 ```
 
 ### Video Loading Backend (AutoDL Specific)
@@ -430,7 +479,7 @@ Decord is pre-configured as the default backend. If Decord is not available, the
 
 - **Framework**: [MIT](LICENSE)
 - **Author**: [@autentisitet](https://github.com/autentisitet)
-- **Version**: 0.9.1-beta (pre-release)
+- **Version**: 0.9.2-beta (pre-release)
 
 ---
 
@@ -439,6 +488,11 @@ Decord is pre-configured as the default backend. If Decord is not available, the
 - PyTorch team for deep learning framework
 - Decord developers for efficient video loading
 - TID2013, KoNViD-1k, T2VQA-DB dataset providers
+
+---
+
+## ⚖️ Legal & Disclaimer
+For details regarding third-party tool usage, dataset compliance, and resource usage, please refer to the [DISCLAIMER.md](DISCLAIMER.md) file.
 
 ---
 

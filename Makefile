@@ -1,11 +1,15 @@
 # --- Project Metadata ---
 PROJECT_NAME := Deep-VQA-Framework
 ROOT_DIR := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
-PYTHON := uv run --project $(ROOT_DIR)/pyproject.toml python
+$(shell [ -f "$(ROOT_DIR)/Makefile" ] || (echo "❌ Error: Makefile not found in ROOT_DIR"; exit 1))
 
+PYTHON_CMD := $(shell if [ -f "$(ROOT_DIR)/.venv/bin/python" ]; then echo "$(ROOT_DIR)/.venv/bin/python"; else echo "python3"; fi)
+PYTHON := $(PYTHON_CMD)
+LOG_DIR := $(ROOT_DIR)/results/scripts_logs
 
+$(shell mkdir -p $(LOG_DIR))
 $(info 📂 Project Root detected as: $(ROOT_DIR))
-.PHONY: setup data train check clean help network all
+.PHONY: setup data link train check clean help optimize archive stop test
 
 # Make sure the first goal is to help
 # 	 When you type `make` directly in the terminal without any arguments,
@@ -14,72 +18,138 @@ help:
 	@echo "🛠️  $(PROJECT_NAME) Commands:"
 	@echo "  make setup      - Install dependencies, optimize network"
 	@echo "  make data       - Prepare datasets"
-	@echo "  make train      - Start training in background"
+	@echo "  make link       - Set up symbolic links"
+	@echo "  make train      - Start training in background (usage: make train [DATASET=name] [MODEL=name] [DEBUG=1])"
+	@echo "  make test       - Run smoke test (DEBUG mode)"
 	@echo "  make check      - Check training status (GPU/memory/process)"
 	@echo "  make clean      - Clean caches and temp files"
-	@echo "  make network    - Optimize network/Jupyter settings"
-	@echo "  make all        - Full pipeline (setup + data + train)"
+	@echo "  make optimize   - Optimize network/Jupyter settings"
+	@echo "  make archive    - Package results"
+	@echo "  make stop       - Stop training processes"
+	@echo ""
+	@echo "💡 Tip: To customize training, e.g.:"
+	@echo "       make train DATASET=coco MODEL=vit_b DEBUG=1"
 	@echo ""
 	@echo "📁 Config file: ../config/base_config.yaml"
 
 
 # 1. Environment Initialization
 setup:
-	@echo "🔐 Setting script permissions..."
+	@echo "🔐 Setting script permissions...(Log: $(LOG_DIR)/setup_env.log)"
 	@chmod +x $(ROOT_DIR)/scripts/*.sh
-	@echo "⚙️  Setting up environment..."
-	@cd $(ROOT_DIR)/scripts && bash setup_env.sh --mirror
-	@echo "✅ Environment ready"
-
+	if [ -d "$(ROOT_DIR)/.venv" ]; then \
+		echo "✅ Environment already exists. Skipping setup."; \
+	else \
+		echo "⚙️  Setting up environment..." \
+		cd $(ROOT_DIR)/scripts && bash setup_env.sh --mirror > $(LOG_DIR)/setup_env.log 2>&1 \
+		echo "✅ Environment ready" \
+	fi
 
 # 2. Data Preparation
 data:
-	@echo "📦 Preparing datasets..."
-	@cd $(ROOT_DIR)/scripts && bash manage_data.sh
+	@echo "📦 Preparing datasets... (Log: $(LOG_DIR)/manage_data.log)"
+	@cd $(ROOT_DIR)/scripts && bash manage_data.sh > $(LOG_DIR)/manage_data.log 2>&1
 	@echo "✅ Data ready"
 
 
-# 3. Start training (runs in the background)
+# 3. Symbolic Links
+link:
+	@echo "🔗 Setting up symbolic links... (Log: $(LOG_DIR)/setup_links.log)"
+	@cd $(ROOT_DIR)/scripts && bash setup_links.sh --all > $(LOG_DIR)/setup_links.log 2>&1
+	@echo "✅ Symbolic links ready"
+
+
+# 4. Start training (runs in the background)
 # nohup must be followed by a real, standalone executable file/program.
+# Caution: This command would not run `make check` and `make optimize`
+DATASET ?= tid2013
+MODEL ?= resnet_iqa
+DEBUG ?= 0
+
 train:
+	@if [ ! -f "$(PYTHON)" ]; then \
+        echo "❌ Python environment not found. Please run 'make setup' first."; \
+        exit 1; \
+    fi
+
 	@if [ ! -f $(ROOT_DIR)/scripts/download_flag ]; then \
 		echo "⚠️  Dataset flag not found. Preparing datasets..."; \
-		make setup; \
-		make data; \
+		$(MAKE) data && $(MAKE) link; \
 	fi
-	@mkdir -p $(ROOT_DIR)/results/scripts_logs
-	@echo "🚀 Starting training in background..."
-	@cd $(ROOT_DIR) && nohup $(PYTHON) -m src.main > results/scripts_logs/train.log 2>&1 &
+	@echo "🚀 Starting training in background... (Log: $(LOG_DIR)/train.log)"
+	@if [ -f "$(LOG_DIR)/train.log" ] && [ $$(stat -c%s "$(LOG_DIR)/train.log") -gt 10485760 ]; then \
+        mv "$(LOG_DIR)/train.log" "$(LOG_DIR)/train.log.$$(date +%Y%m%d%H%M%S).bak"; \
+    fi
+	@cd $(ROOT_DIR) && \
+	export LOG_LEVEL=$$(if [ "$(DEBUG)" = "1" ]; then echo "DEBUG"; else echo "INFO"; fi); \
+	nohup $(PYTHON) -m src.main \
+		--dataset "$(DATASET)" \
+		--model "$(MODEL)" \
+		> $(LOG_DIR)/train.log 2>&1 &
 	@echo "🔥 Training started. PID: $$!"
-	@echo "Monitor with: tail -f $(ROOT_DIR)/train.log"
+	@echo "Monitor with: tail -f $(LOG_DIR)/train.log"
 
 
-# 4. Status Audit
+test:
+	@if [ ! -f "$(PYTHON)" ]; then \
+        echo "❌ Python environment not found. Please run 'make setup' first."; \
+        exit 1; \
+    fi
+
+	@if [ ! -f $(ROOT_DIR)/scripts/download_flag ]; then \
+		echo "⚠️  Dataset flag not found. Preparing datasets..."; \
+		$(MAKE) data && $(MAKE) link; \
+	fi
+	@echo "🧪 Running smoke test (DEBUG mode)... (Log: $(LOG_DIR)/smoke_test.log)"
+	@if [ -f "$(LOG_DIR)/smoke_test.log" ]; then \
+		mv "$(LOG_DIR)/smoke_test.log" "$(LOG_DIR)/smoke_test.log.$$(date +%Y%m%d%H%M%S).bak"; \
+	fi
+	@cd $(ROOT_DIR) && \
+	export LOG_LEVEL=DEBUG; \
+	$(PYTHON) -m src.main \
+		--dataset "$(DATASET)" \
+		--model "$(MODEL)" \
+		--smoke_test \
+		> $(LOG_DIR)/smoke_test.log 2>&1
+	@echo "✅ Smoke test completed! Log: $(LOG_DIR)/smoke_test.log"
+
+
+
+# 5. Status Audit
 check:
-	@cd $(ROOT_DIR)/scripts && bash system_check.sh
+	@echo "🔍 Checking system status... (Log: $(LOG_DIR)/system_check.log)"
+	@cd $(ROOT_DIR)/scripts && bash system_check.sh > $(LOG_DIR)/system_check.log 2>&1
 
 
-# 5. Network Optimization
-network:
-	@cd $(ROOT_DIR)/scripts && bash network_control.sh
+# 6. Optimize Environment (network/Jupyter settings)
+optimize:
+	@echo "🔧 Optimizing Environment... (Log: $(LOG_DIR)/optimize_env.log)"
+	@cd $(ROOT_DIR)/scripts && bash optimize_env.sh > $(LOG_DIR)/optimize_env.log 2>&1
 
 
-# 6. Clear cache
+# 7. Clear cache
 clean:
-	@cd $(ROOT_DIR)/scripts && bash cache_clean.sh
+	@read -p "Are you sure you want to clean all caches? [y/N] " confirm; \
+    if [ "$$confirm" = "y" ]; then \
+		echo "🧹 Cleaning... (Log: $(LOG_DIR)/cache_clean.log)"; \
+        bash $(ROOT_DIR)/scripts/cache_clean.sh > $(LOG_DIR)/cache_clean.log 2>&1; \
+    else \
+        echo "Clean aborted."; \
+    fi
 
 
-# 7. Packaging Results
+# 8. Packaging Results
 archive:
-	@cd $(ROOT_DIR)/scripts && bash archive_results.sh --all
+	@echo "📦 Archiving... (Log: $(LOG_DIR)/archive.log)"
+	@if [ -f "$(LOG_DIR)/archive.log" ]; then \
+		mv "$(LOG_DIR)/archive.log" "$(LOG_DIR)/archive.log.$$(date +%Y%m%d%H%M%S).bak"; \
+	fi
+	@cd $(ROOT_DIR)/scripts && bash archive_results.sh --all > $(LOG_DIR)/archive.log 2>&1
 
 
-#8. One-click full process (for initial exploration)
-all: setup data train
-	@echo "🎉 Full pipeline completed!"
-
-
-#9. Stop training
+# 9. Stop training processes
 stop:
-	@echo "🛑 Stopping training..."
-	@pkill -f "$(ROOT_DIR)/src/main.py" || echo "No training process found"
+	@echo "🛑 Stopping training processes..."
+	@ps aux | grep "[s]rc.main" | awk '{print $$2}' | xargs kill -15 2>/dev/null || echo "No training process found"
+	@sleep 2
+	@ps aux | grep "[s]rc.main" | awk '{print $$2}' | xargs kill -9 2>/dev/null || echo "No training process found"

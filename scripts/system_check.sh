@@ -68,18 +68,22 @@ echo -e "  Total: ${MEM_TOTAL} | Used: ${MEM_USED} | Available: ${MEM_AVAIL} | U
 # 4. GPU memory check (AutoDL essential)
 echo -e "\n${YELLOW}[4/11] GPU memory status:${NC}"
 if command -v nvidia-smi &> /dev/null; then
-    nvidia-smi --query-gpu=index,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>/dev/null | \
-    while IFS=', ' read -r gpu_id gpu_util mem_used mem_total gpu_temp; do
-        MEM_PERCENT=$(echo "scale=1; $mem_used * 100 / $mem_total" | bc)
-        if (( $(echo "$MEM_PERCENT > 90" | bc -l) )); then
-            MEM_COLOR=$RED
-        elif (( $(echo "$MEM_PERCENT > 70" | bc -l) )); then
-            MEM_COLOR=$YELLOW
-        else
-            MEM_COLOR=$GREEN
-        fi
-        echo -e "  GPU $gpu_id: Util ${gpu_util}% | Memory ${mem_used}MiB / ${mem_total}MiB (${MEM_COLOR}${MEM_PERCENT}%${NC}) | Temp ${gpu_temp}°C"
-    done
+    if [ -n "$(nvidia-smi -L 2>/dev/null)" ]; then
+        nvidia-smi --query-gpu=index,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>/dev/null | \
+        while IFS=', ' read -r gpu_id gpu_util mem_used mem_total gpu_temp; do
+            MEM_PERCENT=$(echo "scale=1; $mem_used * 100 / $mem_total" | bc)
+            if (( $(echo "$MEM_PERCENT > 90" | bc -l) )); then
+                MEM_COLOR=$RED
+            elif (( $(echo "$MEM_PERCENT > 70" | bc -l) )); then
+                MEM_COLOR=$YELLOW
+            else
+                MEM_COLOR=$GREEN
+            fi
+            echo -e "  GPU $gpu_id: Util ${gpu_util}% | Memory ${mem_used}MiB / ${mem_total}MiB (${MEM_COLOR}${MEM_PERCENT}%${NC}) | Temp ${gpu_temp}°C"
+        done
+    else
+        echo -e "  ${YELLOW}[!] No GPU detected or nvidia-smi failed.${NC}"
+    fi
 else
     echo -e "  ${YELLOW}[!] nvidia-smi not found (no GPU or driver not installed)${NC}"
 fi
@@ -182,7 +186,15 @@ if command -v pip &> /dev/null; then
     echo -e "  ${GREEN}[√] pip available${NC}"
 fi
 
-cat ~/.jupyter/jupyter_server_config.py | grep "websocket_max_message_size"
+
+if [ -f ~/.jupyter/jupyter_server_config.py ]; then
+    echo -e "\n${YELLOW}[Jupyter Config Check]:${NC}"
+    grep "websocket_max_message_size" ~/.jupyter/jupyter_server_config.py || echo "  [!] Not found"
+else
+    echo -e "\n${YELLOW}[Jupyter Config Check]: Config file not found, skipping.${NC}"
+fi
+
+
 # Summary
 echo -e "\n${BLUE}========================================${NC}"
 echo -e "${GREEN}✓ System check completed!${NC}"

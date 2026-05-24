@@ -5,12 +5,13 @@
 set -e
 
 # --- 1. Core path definitions ---
-DATA_DISK_PATH="/root/autodl-tmp"
-PROJECT_DIR="$DATA_DISK_PATH/deep-vqa-framework"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_PARENT_DIR="$(dirname "$PROJECT_DIR")"
 DOWNLOAD_CACHE="${PROJECT_DIR}/.download_cache"
 
 # Redirect AI model and package manager caches to large data disk
-TMP_CACHE_DIR="${DATA_DISK_PATH}/.system_caches"
+TMP_CACHE_DIR="${PROJECT_PARENT_DIR}/.system_caches"
 mkdir -p "$TMP_CACHE_DIR/huggingface" "$TMP_CACHE_DIR/modelscope" "$TMP_CACHE_DIR/uv"
 
 # Permission fallback
@@ -60,7 +61,7 @@ if [ -d "$DOWNLOAD_CACHE" ]; then
     fi
 fi
 # Remove zero-byte zombie download files
-find "$DATA_DISK_PATH" -name "*.zip" -size 0 -delete 2>/dev/null || true
+find "$PROJECT_PARENT_DIR" -name "*.zip" -size 0 -delete 2>/dev/null || true
 
 # 2. UV and pip package manager cache cleaning
 echo "🐍 Cleaning Python package manager caches..."
@@ -101,8 +102,8 @@ fi
 # Disk usage report
 # ========================================================
 echo "------------------------------------------------"
-echo "📊 Data disk usage ($DATA_DISK_PATH):"
-df -h "$DATA_DISK_PATH" | awk 'NR==2 {print "Used: " $3 " | Available: " $4 " | Usage: " $5}'
+echo "📊 Data disk usage ($PROJECT_PARENT_DIR):"
+df -h "$PROJECT_PARENT_DIR" | awk 'NR==2 {print "Used: " $3 " | Available: " $4 " | Usage: " $5}'
 
 echo "📊 System disk usage (/):"
 df -h / | awk 'NR==2 {print "System used: " $3 " | Available: " $4 " (safety threshold > 5GB)"}'

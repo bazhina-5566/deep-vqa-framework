@@ -66,6 +66,43 @@ else
 fi
 
 
+
+
+detect_proxy_port() {
+    if [ -n "$http_proxy" ]; then
+        local port=$(echo "$http_proxy" | sed -E 's/.*:([0-9]+).*/\1/')
+        if curl -s -o /dev/null --max-time 2 --proxy "$http_proxy" "https://httpbin.org/get" 2>/dev/null; then
+            echo "$port"
+            return 0
+        fi
+    fi
+
+
+    for port in 7890 10809 1080; do
+        if curl -s -o /dev/null --max-time 2 --proxy "http://127.0.0.1:$port" "https://httpbin.org/get" 2>/dev/null; then
+            echo "$port"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+
+setup_proxy() {
+    local port
+    port=$(detect_proxy_port)
+    if [ -n "$port" ]; then
+        export http_proxy="http://127.0.0.1:$port"
+        export https_proxy="$http_proxy"
+        export no_proxy="127.0.0.1,localhost,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,*.cn,*.mirrors.edu.cn,mirrors.tuna.tsinghua.edu.cn"
+        echo "Proxy enabled on port $port"
+    else
+        echo "No proxy detected, using direct connection"
+    fi
+}
+
+
 # Output styling
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -87,10 +124,8 @@ APT_PACKAGES=(
     bc
     ffmpeg
     imagemagick
-    ffprobe
 )
 UV_PACKAGES=(
-    torch torchvision torchaudio
     opencv-python decord
     pyyaml
     numpy matplotlib pillow seaborn
@@ -98,12 +133,15 @@ UV_PACKAGES=(
     scikit-learn scipy
     gdown
 )
-DATA_DISK_PATH="/root/autodl-tmp"
-PROJECT_DIR="$DATA_DISK_PATH/deep-vqa-framework"
+
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_PARENT_DIR="$(dirname "$PROJECT_DIR")"
 DETECTED_PATH="${PROJECT_DIR}/datasets"
 
-rm -f "$DATA_DISK_PATH/pyproject.toml" "$DATA_DISK_PATH/uv.lock" "$DATA_DISK_PATH/.python-version"
-rm -rf "$DATA_DISK_PATH/.venv"
+rm -f "$PROJECT_DIR/pyproject.toml" "$PROJECT_DIR/uv.lock" "$PROJECT_DIR/.python-version"
+rm -rf "$PROJECT_DIR/.venv"
 mkdir -p "$PROJECT_DIR"
 mkdir -p "$DETECTED_PATH"
 
@@ -112,11 +150,11 @@ cd "$PROJECT_DIR"
 echo "⚙️ Installing basic tools..."
 if [ -f "/etc/network_environment" ]; then
     source /etc/network_environment
-# else
-  # export http_proxy=http://127.0.0.1:7890
-  # export https_proxy=http://127.0.0.1:7890
-  # export no_proxy="127.0.0.1,localhost,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,*.cn,*.mirrors.edu.cn,mirrors.tuna.tsinghua.edu.cn"
+else
+    setup_proxy
 fi
+
+
 if [ "$USE_MIRROR" = true ]; then
     echo -e "${GREEN}Using temporary TUNA mirror config...${NC}"
     TEMP_SOURCES="/tmp/tuna_sources.list"
@@ -134,12 +172,12 @@ EOF
     export PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
 fi
 
-${APT_SUDO} apt-get update ${APT_OPT[@]} -qq
-${APT_SUDO} apt-get install -y ${APT_OPT[@]} "${APT_PACKAGES[@]}"
+${APP_SUDO} apt-get update ${APT_OPT[@]} -qq
+${APP_SUDO} apt-get install -y ${APT_OPT[@]} "${APT_PACKAGES[@]}"
 
 
 
-export UV_CACHE_DIR="$DATA_DISK_PATH/.uv_cache"
+export UV_CACHE_DIR="$PROJECT_PARENT_DIR/.uv_cache"
 if ! command -v uv &> /dev/null; then
     curl -LsSf https://astral.sh/uv/install.sh | sh
     if [ -f "$HOME/.cargo/env" ]; then
@@ -154,33 +192,40 @@ fi
 [ ! -f "pyproject.toml" ] && uv init --bare     # Initialize the bare pyproject.toml
 sed -i 's/name = ".*"/name = "deep-vqa-framework"/' pyproject.toml
 
-# There may be path conflicts in the Conda environment,
-#   or incompatibility between dependencies in the old environment (Resolution failure),
-#   which can cause the installation of the UV environment to be very slow.
-PYTHON_EXE=$(which python3 || which python)
-if [ -z "$PYTHON_EXE" ]; then
-    echo "[!] System Python not found, letting uv handle it..."
-    uv venv --python 3.12 --seed --clear
+echo "⚙️ Creating isolated Python 3.12 environment..."
+if command -v python3 &> /dev/null; then
+    uv venv .venv --python "$(which python3)" --seed --clear
 else
-    echo "[√] Found Python at $PYTHON_EXE"
-    uv venv --python "$PYTHON_EXE" --clear
+    uv venv .venv --python 3.12 --seed --clear
 fi
 source .venv/bin/activate
+
 echo "📌 Pinning Python version and syncing packages..."
 uv python pin 3.12      # Lock the python version
 
 
+if command -v nvidia-smi &> /dev/null; then
+    echo "Detected GPU, installing CUDA-enabled torch..."
+    uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+else
+    echo "Detected CPU only, installing standard torch..."
+    uv pip install torch torchvision torchaudio
+fi
 uv add "${UV_PACKAGES[@]}" --no-sync
-uv sync --project ./pyproject.toml
+uv sync --project ./pyproject.toml --jobs 2
 
 # Non-intrusive configuration apt mirror source
 [ -n "$TEMP_SOURCES" ] && [ -f "$TEMP_SOURCES" ] && rm -f "$TEMP_SOURCES"
 
 
+echo "------------------------------------------------"
+echo "🔍 Verifying installation..."
+uv run python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
+echo "------------------------------------------------"
 
 echo "------------------------------------------------"
 echo "🚀 Configuration complete! Execute the command to start training:"
 echo "   chmod +x ./manage_data.sh      "
 echo "   ./manage_data.sh               "
-echo "   nohup uv run main.py > train.log 2>&1"
+echo "   nohup uv run python -m src.main > train.log 2>&1"
 echo "------------------------------------------------"
