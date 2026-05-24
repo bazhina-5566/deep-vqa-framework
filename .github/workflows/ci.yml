@@ -85,30 +85,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install unzip
-        run: sudo apt-get update -qq && sudo apt-get install -y unzip
+      - name: Install zip/unzip
+        run: sudo apt-get update -qq && sudo apt-get install -y zip unzip
 
       - name: Test smart_extract logic (mock ZIP)
-        run: |
-          bash <<EOF
-          $(sed -n '/^smart_extract() {/,/^}$/p' scripts/manage_data.sh)
-
-          mkdir -p /tmp/mock_dataset/nested_dir
-          echo "mock_image_001.png" > /tmp/mock_dataset/nested_dir/img001.png
-          echo "mos_scores.csv" > /tmp/mock_dataset/nested_dir/mos.csv
-          cd /tmp && zip -qr mock_dataset.zip mock_dataset/
-
-          TARGET=/tmp/extract_output
-          rm -rf "$TARGET"
-          smart_extract /tmp/mock_dataset.zip "$TARGET"
-          [ -f "$TARGET/img001.png" ] || { echo "FAIL: flatten - img001.png missing"; exit 1; }
-          [ -f "$TARGET/mos.csv" ]    || { echo "FAIL: flatten - mos.csv missing"; exit 1; }
-          echo "PASS: smart_extract flatten logic"
-
-          TARGET=/tmp/already_exists
-          mkdir -p "$TARGET"
-          echo "existing_file" > "$TARGET/existing.txt"
-          smart_extract /tmp/mock_dataset.zip "$TARGET"
-          [ -f "$TARGET/existing.txt" ] || { echo "FAIL: skip - existing file overwritten"; exit 1; }
-          echo "PASS: smart_extract skips non-empty existing directory"
-          EOF
+        run: bash scripts/ci_test_smart_extract.sh
