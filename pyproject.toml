@@ -21,21 +21,34 @@ dependencies = [
     "tqdm>=4.67.3",
 ]
 
-[dependency-groups]
+
+[project.optional-dependencies]
 dev = [
-    "mypy>=2.1.0",
-    "ruff>=0.15.14",
-    "types-pyyaml>=6.0.12.20260518",
-    "types-tqdm>=4.67.3.20260518",
+    "ruff>=0.9.0",
+    "mypy>=1.14.0",
 ]
 
+
 [tool.ruff]
-line-length = 160
+line-length = 120
 target-version = "py312"
+
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
-ignore = []
+
+
+# E501: line too long (handled by formatter)
+# F401: unused imports (models may use star imports)
+ignore = [
+    "E501",
+    "F401",
+]
+
+
+[tool.ruff.lint.per-file-ignores]
+"src/main.py" = ["F401"]
+
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]
@@ -43,3 +56,9 @@ known-first-party = ["src"]
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = false

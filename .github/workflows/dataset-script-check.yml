@@ -1,0 +1,130 @@
+name: Dataset Script Check
+
+on:
+  push:
+    branches: ["main", "master", "dev"]
+    paths:
+      - "scripts/manage_data.sh"
+      - "scripts/setup_links.sh"
+      - ".github/workflows/dataset-script-check.yml"
+  pull_request:
+    branches: ["main", "master", "dev"]
+    paths:
+      - "scripts/manage_data.sh"
+      - "scripts/setup_links.sh"
+      - ".github/workflows/dataset-script-check.yml"
+
+jobs:
+  syntax-check:
+    name: Shell Script Syntax Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check all shell scripts for syntax errors
+        run: |
+          echo "Running bash -n on all scripts..."
+          failed=0
+          for f in scripts/*.sh; do
+            bash -n "$f" && echo "  OK: $f" || { echo "  FAIL: $f"; failed=1; }
+          done
+          exit $failed
+
+  url-reachability:
+    name: Dataset URL Reachability Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check TID2013 source URL
+        run: |
+          curl --head --silent --fail --max-time 15 \
+            "http://www.ponomarenko.info/tid2013/tid2013.rar" \
+            -o /dev/null -w "TID2013: HTTP %{http_code}\n" \
+            || echo "WARNING: TID2013 URL unreachable (may be geo-restricted)"
+        continue-on-error: true
+
+      - name: Check KoNViD-1k videos URL
+        run: |
+          curl --head --silent --fail --max-time 15 \
+            "https://datasets.vqa.mmsp-kn.de/archives/KoNViD_1k_videos.zip" \
+            -o /dev/null -w "KoNViD-1k videos: HTTP %{http_code}\n" \
+            || echo "WARNING: KoNViD-1k videos URL unreachable"
+        continue-on-error: true
+
+      - name: Check KoNViD-1k metadata URL
+        run: |
+          curl --head --silent --fail --max-time 15 \
+            "https://datasets.vqa.mmsp-kn.de/archives/KoNViD_1k_metadata.zip" \
+            -o /dev/null -w "KoNViD-1k metadata: HTTP %{http_code}\n" \
+            || echo "WARNING: KoNViD-1k metadata URL unreachable"
+        continue-on-error: true
+
+      - name: Check T2VQA-DB Google Drive URL
+        run: |
+          # Google Drive 不支持 HEAD 请求，用 GET 只取响应头
+          http_code=$(curl --silent --max-time 15 \
+            -o /dev/null -w "%{http_code}" \
+            "https://drive.google.com/file/d/1aak5hgYsXock19d1rVufss3_X6eEA4Wx/view")
+          echo "T2VQA-DB (Google Drive): HTTP ${http_code}"
+          # 200/303 都说明页面可达（不代表文件可下载，但至少 ID 存在）
+          [[ "$http_code" == "200" || "$http_code" == "303" ]] \
+            || echo "WARNING: T2VQA-DB Google Drive page returned HTTP ${http_code}"
+        continue-on-error: true
+
+      - name: Summarize URL check results
+        run: |
+          echo "URL reachability check complete."
+          echo "Note: 'WARNING' above means a URL is currently unreachable from GitHub Actions"
+          echo "      (may be due to geo-restriction or rate limiting, not necessarily broken)."
+
+  extract-logic-test:
+    name: smart_extract Function Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install test dependencies
+        run: sudo apt-get install -y unzip unrar-free
+
+      - name: Create mock ZIP archive
+        run: |
+          mkdir -p /tmp/mock_dataset/nested_dir
+          echo "mock_image_001.png" > /tmp/mock_dataset/nested_dir/img001.png
+          echo "mock_image_002.png" > /tmp/mock_dataset/nested_dir/img002.png
+          echo "mos_scores.csv"     > /tmp/mock_dataset/nested_dir/mos.csv
+          cd /tmp && zip -r mock_dataset.zip mock_dataset/
+
+      - name: Test smart_extract with nested ZIP (flatten logic)
+        run: |
+          # 直接 source manage_data.sh 会触发真实下载，所以用 grep 提取函数单独测试
+          bash -c "
+          $(grep -A 50 '^smart_extract()' scripts/manage_data.sh | head -60)
+
+          TARGET=/tmp/extract_output
+          smart_extract /tmp/mock_dataset.zip \$TARGET
+
+          echo '--- Extracted contents ---'
+          ls -la \$TARGET
+
+          # 验证文件确实被 flatten 到目标目录（而不是嵌套在子目录里）
+          [ -f \$TARGET/img001.png ] || { echo 'FAIL: img001.png not found after flatten'; exit 1; }
+          [ -f \$TARGET/mos.csv    ] || { echo 'FAIL: mos.csv not found after flatten'; exit 1; }
+          echo 'PASS: smart_extract flatten logic works correctly'
+          "
+
+      - name: Test smart_extract skips existing non-empty directory
+        run: |
+          bash -c "
+          $(grep -A 50 '^smart_extract()' scripts/manage_data.sh | head -60)
+
+          TARGET=/tmp/already_exists
+          mkdir -p \$TARGET
+          echo 'existing_file' > \$TARGET/existing.txt
+
+          smart_extract /tmp/mock_dataset.zip \$TARGET
+
+          # 目录已存在且非空，应跳过解压，existing.txt 仍在
+          [ -f \$TARGET/existing.txt ] || { echo 'FAIL: existing file was overwritten'; exit 1; }
+          echo 'PASS: smart_extract correctly skips non-empty existing directory'
+          "
