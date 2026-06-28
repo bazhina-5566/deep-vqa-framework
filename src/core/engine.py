@@ -356,6 +356,7 @@ class TrainerEngine:
 
         # NOTE：Make sure that the base_filename obtained here has already been aligned.
         base_name = self.evaluator.base_filename
+        current_score = metrics.get(self.checkpoint_monitor, 0.0)
 
         def extract_score(path: Path):
 
@@ -373,7 +374,6 @@ class TrainerEngine:
         }
 
         if is_best:
-            current_score = metrics.get(self.checkpoint_monitor, 0.0)
             # NOTE：Directly construct an absolute path
             pt_name = f"{base_name}_fold{self.config.get('current_fold', '1')}_best_epoch{epoch}_{self.checkpoint_monitor}{current_score:.4f}.pt"
             target_path = save_dir / pt_name
