@@ -91,7 +91,7 @@ detect_proxy_port() {
 
 setup_proxy() {
     local port
-    port=$(detect_proxy_port)
+    port=$(detect_proxy_port) || true
     if [ -n "$port" ]; then
         export http_proxy="http://127.0.0.1:$port"
         export https_proxy="$http_proxy"
@@ -106,6 +106,7 @@ setup_proxy() {
 # Output styling
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
 NC='\033[0m'
 
 
@@ -124,11 +125,12 @@ APT_PACKAGES=(
     bc
     ffmpeg
     imagemagick
+    dos2unix
 )
 UV_PACKAGES=(
     opencv-python decord
     pyyaml
-    numpy matplotlib pillow seaborn
+    numpy pandas matplotlib pillow seaborn
     loguru tqdm rich PyYAML
     scikit-learn scipy
     gdown
@@ -198,37 +200,7 @@ fi
 # Ensure the project name is correct.
 sed -i 's/name = ".*"/name = "deep-vqa-framework"/' pyproject.toml
 
-echo "⚙️ Creating isolated Python 3.12 environment..."
-
-# ✅ Check if .venv already exists.
-if [ -d ".venv" ]; then
-    echo -e "${BLUE}📂 .venv already exists. Checking if it's valid...${NC}"
-    if [ -f ".venv/bin/python" ]; then
-        echo -e "${GREEN}✅ .venv is valid.${NC}"
-    else
-        echo -e "${YELLOW}⚠️  .venv exists but is incomplete. Recreating...${NC}"
-        rm -rf .venv
-        if command -v python3 &> /dev/null; then
-            uv venv .venv --python "$(which python3)" --seed --clear
-        else
-            uv venv .venv --python 3.12 --seed --clear
-        fi
-    fi
-else
-    echo -e "${BLUE}📂 Creating new .venv...${NC}"
-    if command -v python3 &> /dev/null; then
-        uv venv .venv --python "$(which python3)" --seed --clear
-    else
-        uv venv .venv --python 3.12 --seed --clear
-    fi
-fi
-
-source .venv/bin/activate
-
-echo "📌 Pinning Python version and syncing packages..."
-uv python pin 3.12      # Lock the python version
-
-
+# Detect GPU for PyTorch
 if command -v nvidia-smi &> /dev/null; then
     echo "✔ Detected GPU: Configuring CUDA-enabled torch."
     TORCH_INDEX="https://download.pytorch.org/whl/cu121"
@@ -237,25 +209,57 @@ else
     TORCH_INDEX="https://download.pytorch.org/whl/cpu"
 fi
 
-# ✅ Check whether a package needs to be added.
-echo "Checking dependencies..."
-MISSING_PACKAGES=()
-for pkg in "${UV_PACKAGES[@]}"; do
-    if ! uv pip show "$pkg" &> /dev/null; then
-        MISSING_PACKAGES+=("$pkg")
+echo "⚙️ Setting up Python environment..."
+
+# ============================================================
+# ✅ 核心逻辑：如果 .venv 存在 → 检查缺失包 → uv add
+#             如果 .venv 不存在 → 从头创建 → uv sync
+# ============================================================
+
+if [ -d ".venv" ] && [ -f ".venv/bin/python" ]; then
+    echo -e "${GREEN}✅ .venv already exists and is valid.${NC}"
+    source .venv/bin/activate
+    
+    echo "📌 Pinning Python version..."
+    uv python pin 3.12 2>/dev/null || true
+    
+    # ✅ 检查缺失的包，只添加缺失的
+    echo "Checking dependencies..."
+    MISSING_PACKAGES=()
+    for pkg in "${UV_PACKAGES[@]}"; do
+        if ! uv pip show "$pkg" &> /dev/null 2>&1; then
+            MISSING_PACKAGES+=("$pkg")
+        fi
+    done
+    
+    if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
+        echo -e "${BLUE}📦 Adding missing packages: ${MISSING_PACKAGES[*]}${NC}"
+        uv add "${MISSING_PACKAGES[@]}" --no-sync || { 
+            echo -e "${YELLOW}⚠️  Failed to add packages individually, trying full sync...${NC}"
+            uv sync --extra-index-url "$TORCH_INDEX" --no-dev --jobs 2
+        }
+        echo "Syncing dependencies..."
+        uv sync --extra-index-url "$TORCH_INDEX" --no-dev --jobs 2
+    else
+        echo -e "${GREEN}✅ All packages already present. Skipping sync.${NC}"
     fi
-done
-
-if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
-    echo -e "${BLUE}📦 Adding missing packages: ${MISSING_PACKAGES[*]}${NC}"
-    uv add "${MISSING_PACKAGES[@]}" --no-sync || { echo "Failed to add packages"; exit 1; }
+    
 else
-    echo -e "${GREEN}✅ All packages already present.${NC}"
+    # ✅ .venv 不存在，从头创建
+    echo -e "${BLUE}📂 Creating new .venv...${NC}"
+    if command -v python3 &> /dev/null; then
+        uv venv .venv --python "$(which python3)" --seed --clear
+    else
+        uv venv .venv --python 3.12 --seed --clear
+    fi
+    source .venv/bin/activate
+    
+    echo "📌 Pinning Python version and syncing packages..."
+    uv python pin 3.12
+    
+    echo "Syncing dependencies..."
+    uv sync --extra-index-url "$TORCH_INDEX" --no-dev --jobs 2
 fi
-
-echo "Syncing dependencies..."
-uv sync --extra-index-url "$TORCH_INDEX" --no-dev --jobs 2
-
 
 # Non-intrusive configuration apt mirror source
 [ -n "$TEMP_SOURCES" ] && [ -f "$TEMP_SOURCES" ] && rm -f "$TEMP_SOURCES"
@@ -264,6 +268,7 @@ uv sync --extra-index-url "$TORCH_INDEX" --no-dev --jobs 2
 echo "------------------------------------------------"
 echo "🔍 Verifying installation..."
 uv run python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
+uv run python -c "import cv2, numpy, pandas, loguru, tqdm, sklearn, scipy, gdown; print('✅ All dependencies imported successfully')"
 echo "------------------------------------------------"
 
 echo "------------------------------------------------"
