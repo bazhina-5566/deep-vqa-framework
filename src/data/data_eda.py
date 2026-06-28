@@ -207,16 +207,21 @@ class DataEDA:
         if props:
             logger.info(f"    Scanned Physical Files on Disk: {props['total_files']}")
             logger.info(
-                f"    Resolution boundary: {props['min_resolution'][0]}x{props['min_resolution'][1]} ~ "
-                f"{props['max_resolution'][0]}x{props['max_resolution'][1]}"
+                f"    Resolution boundary: {props['width']['min']}x{props['height']['min']} ~ "
+                f"{props['width']['max']}x{props['height']['max']}"
             )
 
     def _analyze_video_properties(self, video_paths):
         props = analyze_video_properties(video_paths)
-        if props:
-            logger.info(f"    Scanned Physical Videos on Disk: {props['total_files']}")
-            logger.info(f"    Sample Video Size: {props['width']}x{props['height']} | FPS: {props['fps']:.2f}")
-            logger.info(f"    Total Frame Count: {int(props['frame_count'])}")
+        if props and "error" not in props:
+            logger.info(f"    Scanned Physical Videos on Disk: {props.get('total_files', 0)}")
+            # ✅ 适配新格式：从嵌套字典中取值
+            width = props.get('resolution', {}).get('width', {}).get('mean', 0)
+            height = props.get('resolution', {}).get('height', {}).get('mean', 0)
+            fps = props.get('fps', {}).get('mean', 0)
+            frame_count = props.get('frame_count', {}).get('mean', 0)
+            logger.info(f"    Sample Video Size: {int(width)}x{int(height)} | FPS: {fps:.2f}")
+            logger.info(f"    Total Frame Count: {int(frame_count)}")
 
     def _analyze_media_properties(self):
         """Unified analysis of media attributes (based on dataset type)"""
