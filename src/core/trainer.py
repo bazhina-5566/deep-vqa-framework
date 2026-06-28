@@ -251,7 +251,8 @@ class TrainerExecutionPipeline:
             logger.info(f"🌀 [Fold {current_fold}/{n_splits}] 开始...")
 
             self.config["current_fold"] = current_fold
-            evaluator.base_filename = f"{original_base_filename}_fold{current_fold}"
+            # ✅ 修复：不加 fold，保持 base_filename 干净
+            evaluator.base_filename = original_base_filename  # ← 改这里！
 
             train_sub_df = active_df.iloc[train_idx]
             val_sub_df = active_df.iloc[val_idx]

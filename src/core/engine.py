@@ -342,6 +342,7 @@ class TrainerEngine:
             return current > best
         return False
 
+
     def _save_checkpoint(self, epoch: int, val_loss: float, metrics: Dict[str, Any], is_best: bool):
         """Save model checkpoints to the configured directory."""
         import re
@@ -356,11 +357,10 @@ class TrainerEngine:
 
         # NOTE：Make sure that the base_filename obtained here has already been aligned.
         base_name = self.evaluator.base_filename
+        current_fold = self.config.get('current_fold', '1')
         current_score = metrics.get(self.checkpoint_monitor, 0.0)
 
         def extract_score(path: Path):
-
-            # NOTE：Use `re.escape` to prevent special characters, and use regular expressions to match index values ​​in filenames.
             match = re.search(rf"{re.escape(self.checkpoint_monitor)}(-?\d+\.\d+)", path.name.lower())
             return float(match.group(1)) if match else (-float("inf") if self.checkpoint_mode == "max" else float("inf"))
 
@@ -374,14 +374,21 @@ class TrainerEngine:
         }
 
         if is_best:
-            # NOTE：Directly construct an absolute path
-            pt_name = f"{base_name}_fold{self.config.get('current_fold', '1')}_best_epoch{epoch}_{self.checkpoint_monitor}{current_score:.4f}.pt"
+            # ✅ 修复：先构建一个干净的基础名
+            # 如果 base_name 已经包含 fold，就不重复添加
+            if f"_fold{current_fold}" in base_name:
+                clean_base = base_name
+            else:
+                clean_base = f"{base_name}_fold{current_fold}"
+            
+            pt_name = f"{clean_base}_best_epoch{epoch}_{self.checkpoint_monitor}{current_score:.4f}.pt"
             target_path = save_dir / pt_name
 
             torch.save(state, target_path)
             logger.info(f"🏆 [Checkpoint] The weights have been saved to ──> {target_path.resolve()}")
 
-            all_best_pts = list(save_dir.glob(f"{base_name}_fold{self.config.get('current_fold', '1')}_best_epoch*.pt"))
+            # ✅ 删除旧的最佳模型文件（超过 top_k 个）
+            all_best_pts = list(save_dir.glob(f"{clean_base}_best_epoch*.pt"))
             if len(all_best_pts) > top_k:
                 reverse_flag = True if self.checkpoint_mode == "max" else False
                 all_best_pts.sort(key=extract_score, reverse=reverse_flag)
@@ -389,16 +396,14 @@ class TrainerEngine:
                     low_pt.unlink()
                     logger.warning(f"🗑️  [Checkpoint] Delete old model files and keep only the K most recent ones ──> {low_pt.name}")
 
-            # NOTE: Refresh Best Soft Links
-            all_best_pts = list(save_dir.glob(f"{base_name}_fold{self.config.get('current_fold', '1')}_best_epoch*.pt"))
-            if all_best_pts:
-                all_best_pts.sort(key=extract_score, reverse=(self.checkpoint_mode == "max"))
-                best_of_best = all_best_pts[0]
-                standard_best_path = save_dir / f"{base_name}_fold{self.config.get('current_fold', '1')}_best.pt"
-                shutil.copy(best_of_best, standard_best_path)
+            # ✅ 更新 *_best.pt 软链接（复制最新的最佳模型）
+            standard_best_path = save_dir / f"{clean_base}_best.pt"
+            shutil.copy(target_path, standard_best_path)
+            logger.info(f"   └─ ✅ Best model symlink updated: {standard_best_path.name}")
 
         else:
-            pt_name = f"{base_name}_best_epoch{epoch}_{self.checkpoint_monitor}{current_score:.4f}.pt"
+            # ✅ 非最佳模型的保存（不需要重复包含 fold）
+            pt_name = f"{base_name}_epoch{epoch}_{self.checkpoint_monitor}{current_score:.4f}.pt"
             target_path = save_dir / pt_name
             torch.save(state, target_path)
             logger.info(f"💾 [Checkpoint] The model snapshot has been saved to ──> {target_path.resolve()}")
