@@ -26,7 +26,6 @@ cv2.setNumThreads(0)  # or `cv2.setNumThreads(1)`
 def main():
     # 1. Command line argument parsing
     parser = argparse.ArgumentParser(description="Deep VQA/IQA General Data-Driven Framework")
-    parser.add_argument("-c", "--config", type=str, default="basic", help="Basic config filename")
     parser.add_argument("--model", type=str, default="resnet_iqa", help="Model filename (e.g., resnet_iqa)")
     parser.add_argument("--dataset", type=str, default="TID2013", help="Target dataset name")
     parser.add_argument("--smoke_test", action="store_true", help="Activate fast smoke check")
@@ -35,10 +34,10 @@ def main():
     args.dataset = args.dataset.lower()
     args.model = args.model.lower()
 
-    config = load_system_config(args.config, args.dataset)
+    config = load_system_config(args.model, args.dataset)
     config["dataset_name"] = args.dataset
 
-    logger.debug(f"[Main] Command line arguments: config={args.config}, model={args.model}, dataset={args.dataset}, smoke_test={args.smoke_test}")
+    logger.debug(f"[Main] Command line arguments: model={args.model}, dataset={args.dataset}, smoke_test={args.smoke_test}")
 
     dataset_name = config["dataset_name"]
     task_type = config.get("task_type", "vqa")
