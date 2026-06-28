@@ -187,16 +187,42 @@ if ! command -v uv &> /dev/null; then
 fi
 
 
-# cd "$(dirname "$0")/.."
-[ ! -f "pyproject.toml" ] && uv init --bare     # Initialize the bare pyproject.toml
+# ✅ Check if pyproject.toml exists.
+if [ -f "pyproject.toml" ]; then
+    echo -e "${GREEN}✅ pyproject.toml found. Skipping uv init.${NC}"
+else
+    echo -e "${BLUE}⚙️  No pyproject.toml found. Initializing...${NC}"
+    uv init --bare
+fi
+
+# Ensure the project name is correct.
 sed -i 's/name = ".*"/name = "deep-vqa-framework"/' pyproject.toml
 
 echo "⚙️ Creating isolated Python 3.12 environment..."
-if command -v python3 &> /dev/null; then
-    uv venv .venv --python "$(which python3)" --seed --clear
+
+# ✅ Check if .venv already exists.
+if [ -d ".venv" ]; then
+    echo -e "${BLUE}📂 .venv already exists. Checking if it's valid...${NC}"
+    if [ -f ".venv/bin/python" ]; then
+        echo -e "${GREEN}✅ .venv is valid.${NC}"
+    else
+        echo -e "${YELLOW}⚠️  .venv exists but is incomplete. Recreating...${NC}"
+        rm -rf .venv
+        if command -v python3 &> /dev/null; then
+            uv venv .venv --python "$(which python3)" --seed --clear
+        else
+            uv venv .venv --python 3.12 --seed --clear
+        fi
+    fi
 else
-    uv venv .venv --python 3.12 --seed --clear
+    echo -e "${BLUE}📂 Creating new .venv...${NC}"
+    if command -v python3 &> /dev/null; then
+        uv venv .venv --python "$(which python3)" --seed --clear
+    else
+        uv venv .venv --python 3.12 --seed --clear
+    fi
 fi
+
 source .venv/bin/activate
 
 echo "📌 Pinning Python version and syncing packages..."
@@ -211,10 +237,23 @@ else
     TORCH_INDEX="https://download.pytorch.org/whl/cpu"
 fi
 
-echo "Syncing dependencies..."
-if [ ${#UV_PACKAGES[@]} -gt 0 ]; then
-    uv add "${UV_PACKAGES[@]}" --no-sync || { echo "Failed to add packages"; exit 1; }
+# ✅ Check whether a package needs to be added.
+echo "Checking dependencies..."
+MISSING_PACKAGES=()
+for pkg in "${UV_PACKAGES[@]}"; do
+    if ! uv pip show "$pkg" &> /dev/null; then
+        MISSING_PACKAGES+=("$pkg")
+    fi
+done
+
+if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
+    echo -e "${BLUE}📦 Adding missing packages: ${MISSING_PACKAGES[*]}${NC}"
+    uv add "${MISSING_PACKAGES[@]}" --no-sync || { echo "Failed to add packages"; exit 1; }
+else
+    echo -e "${GREEN}✅ All packages already present.${NC}"
 fi
+
+echo "Syncing dependencies..."
 uv sync --extra-index-url "$TORCH_INDEX" --no-dev --jobs 2
 
 
