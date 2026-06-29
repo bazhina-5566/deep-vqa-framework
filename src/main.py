@@ -35,6 +35,14 @@ def main():
     args.model = args.model.lower()
 
     config = load_system_config(args.model, args.dataset)
+    # 💎 防御点：确认加载到的模型配置跟命令行参数对得上
+    loaded_model_name = config.get("model", {}).get("name", "")
+    logger.info(
+        f"[Sanity Check] CLI传入 model={args.model} -> "
+        f"实际加载模型={loaded_model_name}, task_type={config.get('task_type')}, "
+        f"backbone={config.get('model', {}).get('backbone')}"
+    )
+
     config["dataset_name"] = args.dataset
 
     logger.debug(f"[Main] Command line arguments: model={args.model}, dataset={args.dataset}, smoke_test={args.smoke_test}")
