@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Deep-VQA 多模型质量评价工作台</title>
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --card: rgba(255,255,255,.92);
+      --card-solid: #ffffff;
+      --text: #102033;
+      --muted: #64748b;
+      --primary: #3b5bdb;
+      --primary-dark: #203a8f;
+      --line: #d8e1ef;
+      --ok: #0f9f6e;
+      --warn: #d97706;
+      --danger: #dc2626;
+      --shadow: 0 24px 70px rgba(15, 23, 42, .10);
+      --radius-xl: 28px;
+      --radius-lg: 20px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 8% 6%, rgba(116, 94, 255, .16), transparent 28%),
+        radial-gradient(circle at 92% 12%, rgba(79, 172, 254, .14), transparent 26%),
+        linear-gradient(135deg, #f7f9fd 0%, #eef3fb 100%);
+      padding: 28px;
+    }
+
+    .shell { max-width: 1380px; margin: 0 auto; }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(320px, .85fr);
+      gap: 22px;
+      align-items: stretch;
+      margin-bottom: 22px;
+    }
+
+    .hero-main,
+    .panel {
+      background: var(--card);
+      border: 1px solid rgba(255,255,255,.75);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(16px);
+    }
+
+    .hero-main { padding: 32px; position: relative; overflow: hidden; }
+    .hero-main::after {
+      content: "";
+      position: absolute;
+      width: 220px;
+      height: 220px;
+      border-radius: 50%;
+      background: rgba(59,91,219,.08);
+      right: -70px;
+      top: -80px;
+    }
+
+    .kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 14px;
+      border-radius: 999px;
+      background: #e0e7ff;
+      color: var(--primary-dark);
+      font-weight: 800;
+      font-size: 13px;
+    }
+
+    h1 { margin: 18px 0 10px; font-size: clamp(30px, 4vw, 48px); letter-spacing: -1px; }
+    h2 { margin: 0; font-size: 20px; }
+    p { margin: 0; }
+
+    .subtitle { max-width: 860px; color: var(--muted); line-height: 1.75; font-size: 16px; }
+
+    .tags { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: #f1f5ff;
+      color: #334155;
+      border: 1px solid #dbe5ff;
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    .panel { padding: 22px; }
+    .panel-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--line);
+      background: #f8fafc;
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 7px 11px;
+      font-size: 13px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); display: inline-block; }
+    .status-pill.ok .dot { background: var(--ok); }
+    .status-pill.fail .dot { background: var(--danger); }
+
+    .form-row { margin-top: 12px; }
+    label { display: block; color: #334155; font-weight: 850; font-size: 13px; margin-bottom: 7px; }
+    .input-wrap {
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #fff;
+    }
+    .input-wrap span { padding: 0 12px; color: var(--muted); font-size: 12px; font-weight: 900; border-right: 1px solid var(--line); }
+    input[type="text"] { width: 100%; border: 0; outline: none; padding: 13px 12px; font-size: 14px; color: var(--text); background: transparent; }
+
+    .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+    .btn {
+      border: 0;
+      outline: 0;
+      border-radius: 999px;
+      padding: 13px 18px;
+      font-weight: 900;
+      cursor: pointer;
+      color: #fff;
+      background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+      box-shadow: 0 14px 26px rgba(59, 91, 219, .22);
+      transition: transform .18s ease, opacity .18s ease, box-shadow .18s ease;
+    }
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 18px 30px rgba(59, 91, 219, .28); }
+    .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; box-shadow: none; }
+    .btn.secondary { color: var(--primary-dark); background: #eef2ff; box-shadow: none; border: 1px solid #dbe5ff; }
+    .btn.danger { background: #fee2e2; color: var(--danger); box-shadow: none; border: 1px solid #fecaca; }
+
+    .layout { display: grid; grid-template-columns: minmax(330px, .85fr) minmax(0, 1.35fr); gap: 22px; }
+
+    .drop-zone {
+      border: 2px dashed #b8c7dd;
+      border-radius: 24px;
+      min-height: 190px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      cursor: pointer;
+      background: rgba(248,250,252,.9);
+      transition: .2s;
+      padding: 28px;
+    }
+    .drop-zone:hover,
+    .drop-zone.drag { border-color: var(--primary); background: #eff5ff; }
+    .drop-zone strong { display: block; font-size: 18px; margin: 10px 0 6px; }
+    .drop-zone p { color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .file-input { display: none; }
+
+    .file-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+    .meta-item { background: #f8fafc; border: 1px solid var(--line); border-radius: 16px; padding: 12px; }
+    .meta-item span { display: block; color: var(--muted); font-size: 12px; font-weight: 800; margin-bottom: 4px; }
+    .meta-item b { font-size: 13px; overflow-wrap: anywhere; }
+
+    .preview {
+      min-height: 220px;
+      border-radius: 22px;
+      overflow: hidden;
+      background: #0b1120;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      margin: 14px 0;
+    }
+    .preview img, .preview video { max-width: 100%; max-height: 330px; display: block; object-fit: contain; }
+
+    .model-grid { display: grid; gap: 12px; }
+    .model-card {
+      position: relative;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 12px;
+      align-items: flex-start;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px;
+      background: #fff;
+      cursor: pointer;
+      transition: .18s;
+    }
+    .model-card:hover { border-color: #aebfff; transform: translateY(-1px); }
+    .model-card input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--primary); }
+    .model-name { font-weight: 950; margin-bottom: 4px; }
+    .model-desc { color: var(--muted); font-size: 13px; line-height: 1.55; }
+    .model-meta { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 8px; }
+    .chip { font-size: 12px; color: #334155; background: #f1f5f9; border: 1px solid #e2e8f0; padding: 5px 8px; border-radius: 999px; font-weight: 800; }
+
+    .hint {
+      margin-top: 10px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: #fff7ed;
+      color: #9a3412;
+      border: 1px solid #fed7aa;
+      font-size: 13px;
+      line-height: 1.6;
+      font-weight: 650;
+    }
+
+    .progress-wrap { display: none; margin-top: 14px; }
+    .progress-head { display: flex; justify-content: space-between; color: var(--muted); font-size: 13px; font-weight: 850; margin-bottom: 8px; }
+    .progress-bar { width: 100%; height: 9px; background: #e2e8f0; border-radius: 999px; overflow: hidden; }
+    .progress-fill { width: 0; height: 100%; background: linear-gradient(90deg, #4f46e5, #06b6d4); transition: width .2s ease; }
+
+    .message { display: none; margin-top: 14px; border-radius: 16px; padding: 12px 14px; font-size: 13px; font-weight: 750; line-height: 1.6; }
+    .message.info { display:block; color:#1e3a8a; background:#eff6ff; border:1px solid #bfdbfe; }
+    .message.success { display:block; color:#065f46; background:#ecfdf5; border:1px solid #a7f3d0; }
+    .message.error { display:block; color:#991b1b; background:#fef2f2; border:1px solid #fecaca; }
+
+    .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .summary-tile { border: 1px solid var(--line); background: #f8fafc; border-radius: 18px; padding: 14px; }
+    .summary-tile span { display:block; color: var(--muted); font-size: 12px; font-weight: 900; margin-bottom: 6px; }
+    .summary-tile strong { font-size: 22px; }
+
+    .result-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 18px; background: #fff; }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { padding: 13px 14px; text-align: left; border-bottom: 1px solid #edf2f7; font-size: 14px; }
+    th { color: #334155; background: #f8fafc; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+    tr:last-child td { border-bottom: 0; }
+    .mos { font-size: 22px; font-weight: 950; color: var(--primary-dark); }
+    .small { color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .bar { width: 120px; height: 8px; border-radius: 999px; background: #e2e8f0; overflow: hidden; }
+    .bar > i { display:block; height:100%; background: linear-gradient(90deg,#4f46e5,#06b6d4); }
+
+    .empty { text-align: center; color: var(--muted); padding: 34px 18px; }
+    details { margin-top: 14px; border: 1px solid var(--line); border-radius: 18px; background: #fff; overflow: hidden; }
+    summary { cursor: pointer; padding: 13px 15px; font-weight: 900; }
+    pre { margin: 0; padding: 15px; max-height: 280px; overflow: auto; background: #0f172a; color: #e2e8f0; font-size: 12px; line-height: 1.65; }
+
+    .history-list { display: grid; gap: 10px; max-height: 300px; overflow: auto; }
+    .history-item { display:grid; grid-template-columns: 1fr auto; gap: 10px; align-items:center; padding: 12px 14px; border: 1px solid var(--line); border-radius: 16px; background: #fff; }
+    .history-item strong { overflow-wrap: anywhere; }
+
+    @media (max-width: 960px) {
+      body { padding: 16px; }
+      .hero, .layout { grid-template-columns: 1fr; }
+      .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 560px) {
+      .file-meta, .summary-grid { grid-template-columns: 1fr; }
+      .hero-main, .panel { padding: 18px; border-radius: 22px; }
+      .history-item { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="hero-main">
+        <div class="kicker">✅ Multi-Model Real API Mode · 两种以上模型评分</div>
+        <h1>Deep-VQA 多模型质量评价工作台</h1>
+        <p class="subtitle">
+          这个页面不在前端生成假分数。上传图片或视频后，前端会把同一媒体提交给后端的多个模型配置，默认启用仓库中已有的 ResNet50-IQA 与 Swin-T-VQA 两条模型路径，并将每个模型的 MOS、归一化分数、Backbone、耗时和综合均值展示出来。
+        </p>
+        <div class="tags">
+          <span class="tag">🧠 resnet_iqa：IQAVQANet + ResNet50</span>
+          <span class="tag">🎞️ timeswin_vqa：IQAVQANet + Swin-T + Transformer</span>
+          <span class="tag">📤 POST /evaluate · model 参数逐模型调用</span>
+          <span class="tag">📏 Score 0-1 自动映射 MOS 0-5</span>
+        </div>
+      </div>
+
+      <aside class="panel">
+        <div class="panel-title">
+          <h2>后端接口</h2>
+          <span class="status-pill" id="backendStatus"><span class="dot"></span>未检测</span>
+        </div>
+        <div class="form-row">
+          <label for="apiBaseInput">API Base URL</label>
+          <div class="input-wrap"><span>base</span><input id="apiBaseInput" type="text" placeholder="例如 http://127.0.0.1:8000；同源部署可留空" /></div>
+        </div>
+        <div class="form-row">
+          <label for="apiPathInput">评价接口路径</label>
+          <div class="input-wrap"><span>POST</span><input id="apiPathInput" type="text" placeholder="/evaluate 或 /api/evaluate" /></div>
+        </div>
+        <div class="btn-row">
+          <button class="btn secondary" id="saveConfigBtn">💾 保存配置</button>
+          <button class="btn secondary" id="checkBackendBtn">🔌 连接检测</button>
+        </div>
+        <div class="hint">
+          后端需要支持字段：<b>file</b>、<b>media_type</b>、<b>task_type</b>、<b>model</b>。前端会对每个已选模型各请求一次，避免只得到一个单模型分数。
+        </div>
+      </aside>
+    </section>
+
+    <section class="layout">
+      <article class="panel">
+        <div class="panel-title">
+          <h2>1. 上传媒体</h2>
+          <span class="tag" id="taskBadge">等待文件</span>
+        </div>
+
+        <div class="drop-zone" id="dropZone" tabindex="0" role="button" aria-label="点击或拖拽上传媒体">
+          <input class="file-input" id="mediaInput" type="file" accept="image/*,video/mp4,video/quicktime,video/x-matroska,video/webm" />
+          <div>
+            <div style="font-size:46px;line-height:1;">📁</div>
+            <strong>点击或拖拽上传图片 / 视频</strong>
+            <p>支持 JPG、PNG、BMP、MP4、MOV、MKV、WEBM；建议文件 ≤ 200MB。</p>
+          </div>
+        </div>
+
+        <div class="file-meta" id="fileMeta"></div>
+        <div class="preview" id="previewBox">
+          <img id="imagePreview" alt="上传图片预览" hidden />
+          <video id="videoPreview" controls playsinline hidden></video>
+        </div>
+
+        <div style="margin-top:18px;" class="panel-title">
+          <h2>2. 选择评分模型</h2>
+          <span class="tag" id="modelCountTag">已选 2 个</span>
+        </div>
+        <div class="model-grid" id="modelGrid"></div>
+        <div class="hint">实验要求“两种或以上模型评分”，所以这里默认选中 2 个模型；少于 2 个时不会开始评价。</div>
+
+        <div class="progress-wrap" id="progressWrap">
+          <div class="progress-head"><span id="progressText">准备请求</span><span id="progressPercent">0%</span></div>
+          <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+        </div>
+        <div class="btn-row">
+          <button class="btn" id="evaluateBtn" disabled>📊 开始多模型真实评价</button>
+          <button class="btn danger" id="abortBtn" hidden>中止</button>
+        </div>
+        <div class="message" id="messageBox"></div>
+      </article>
+
+      <section class="panel">
+        <div class="panel-title">
+          <h2>多模型评分结果</h2>
+          <span class="status-pill" id="resultStatus"><span class="dot"></span>等待评价</span>
+        </div>
+
+        <div class="summary-grid">
+          <div class="summary-tile"><span>已完成模型数</span><strong id="doneModels">0</strong></div>
+          <div class="summary-tile"><span>综合 MOS 均值</span><strong id="avgMos">--</strong></div>
+          <div class="summary-tile"><span>最高模型 MOS</span><strong id="bestMos">--</strong></div>
+          <div class="summary-tile"><span>总耗时</span><strong id="totalLatency">--</strong></div>
+        </div>
+
+        <div class="result-table-wrap" id="tableWrap">
+          <div class="empty">上传文件并选择至少两个模型后，点击“开始多模型真实评价”。</div>
+        </div>
+
+        <details>
+          <summary>后端返回 JSON / 调试信息</summary>
+          <pre id="rawJson">尚无数据</pre>
+        </details>
+      </section>
+    </section>
+
+    <section class="panel" style="margin-top:22px;">
+      <div class="panel-title">
+        <h2>历史记录</h2>
+        <button class="btn secondary" id="clearHistoryBtn">清空记录</button>
+      </div>
+      <div class="history-list" id="historyList"><div class="empty">暂无真实评价记录。</div></div>
+    </section>
+  </main>
+
+  <script>
+    const MODEL_OPTIONS = [
+      {
+        id: "resnet_iqa",
+        label: "IQAVQANet · ResNet50-IQA",
+        backendModel: "resnet_iqa",
+        backbone: "resnet50",
+        task: "iqa",
+        dataset: "TID2013",
+        desc: "仓库 config/models/resnet_iqa.yaml：面向图像质量评价，Backbone 使用 ResNet50。"
+      },
+      {
+        id: "timeswin_vqa",
+        label: "IQAVQANet · Swin-T-VQA",
+        backendModel: "timeswin_vqa",
+        backbone: "swin_t",
+        task: "vqa",
+        dataset: "KoNViD-1k",
+        desc: "仓库 config/models/timeswin_vqa.yaml：面向视频质量评价，Swin-T 提取空间特征，并使用 Transformer 做时序融合。"
+      }
+    ];
+
+    const STORAGE_CONFIG = "deep_vqa_multimodel_api_config_v1";
+    const STORAGE_HISTORY = "deep_vqa_multimodel_history_v1";
+
+    const $ = id => document.getElementById(id);
+    const els = {
+      apiBase: $("apiBaseInput"), apiPath: $("apiPathInput"), backendStatus: $("backendStatus"),
+      saveConfig: $("saveConfigBtn"), checkBackend: $("checkBackendBtn"), dropZone: $("dropZone"), mediaInput: $("mediaInput"),
+      fileMeta: $("fileMeta"), previewBox: $("previewBox"), imagePreview: $("imagePreview"), videoPreview: $("videoPreview"),
+      taskBadge: $("taskBadge"), modelGrid: $("modelGrid"), modelCountTag: $("modelCountTag"), progressWrap: $("progressWrap"),
+      progressText: $("progressText"), progressPercent: $("progressPercent"), progressFill: $("progressFill"), evaluateBtn: $("evaluateBtn"),
+      abortBtn: $("abortBtn"), message: $("messageBox"), resultStatus: $("resultStatus"), doneModels: $("doneModels"), avgMos: $("avgMos"),
+      bestMos: $("bestMos"), totalLatency: $("totalLatency"), tableWrap: $("tableWrap"), rawJson: $("rawJson"),
+      clearHistory: $("clearHistoryBtn"), historyList: $("historyList")
+    };
+
+    const state = { file: null, mediaType: null, currentObjectUrl: null, activeController: null, history: [] };
+
+    init();
+
+    function init() {
+      loadConfig();
+      renderModelOptions();
+      loadHistory();
+      bindEvents();
+      updateEvaluateButton();
+    }
+
+    function loadConfig() {
+      const saved = safeJson(localStorage.getItem(STORAGE_CONFIG), {});
+      els.apiBase.value = saved.baseUrl ?? "http://127.0.0.1:8000";
+      els.apiPath.value = saved.path ?? "/evaluate";
+    }
+
+    function saveConfig() {
+      localStorage.setItem(STORAGE_CONFIG, JSON.stringify({ baseUrl: els.apiBase.value.trim(), path: normalizePath(els.apiPath.value.trim()) }));
+      showMessage("接口配置已保存。", "success");
+    }
+
+    function renderModelOptions() {
+      els.modelGrid.innerHTML = MODEL_OPTIONS.map(model => `
+        <label class="model-card">
+          <input type="checkbox" value="${model.id}" checked />
+          <div>
+            <div class="model-name">${escapeHtml(model.label)}</div>
+            <div class="model-desc">${escapeHtml(model.desc)}</div>
+            <div class="model-meta">
+              <span class="chip">model=${escapeHtml(model.backendModel)}</span>
+              <span class="chip">${escapeHtml(model.backbone)}</span>
+              <span class="chip">${escapeHtml(model.task.toUpperCase())}</span>
+              <span class="chip">${escapeHtml(model.dataset)}</span>
+            </div>
+          </div>
+        </label>
+      `).join("");
+      els.modelGrid.querySelectorAll("input[type='checkbox']").forEach(input => input.addEventListener("change", updateModelCount));
+      updateModelCount();
+    }
+
+    function bindEvents() {
+      els.saveConfig.addEventListener("click", saveConfig);
+      els.checkBackend.addEventListener("click", checkBackend);
+      els.dropZone.addEventListener("click", () => els.mediaInput.click());
+      els.dropZone.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") els.mediaInput.click(); });
+      els.dropZone.addEventListener("dragover", e => { e.preventDefault(); els.dropZone.classList.add("drag"); });
+      els.dropZone.addEventListener("dragleave", () => els.dropZone.classList.remove("drag"));
+      els.dropZone.addEventListener("drop", e => { e.preventDefault(); els.dropZone.classList.remove("drag"); handleFile(e.dataTransfer.files?.[0]); });
+      els.mediaInput.addEventListener("change", e => handleFile(e.target.files?.[0]));
+      els.evaluateBtn.addEventListener("click", evaluateMultiModel);
+      els.abortBtn.addEventListener("click", abortRequests);
+      els.clearHistory.addEventListener("click", () => { state.history = []; saveHistory(); renderHistory(); });
+    }
+
+    function getSelectedModels() {
+      const checked = Array.from(els.modelGrid.querySelectorAll("input[type='checkbox']:checked")).map(input => input.value);
+      return MODEL_OPTIONS.filter(model => checked.includes(model.id));
+    }
+
+    function updateModelCount() {
+      const count = getSelectedModels().length;
+      els.modelCountTag.textContent = `已选 ${count} 个`;
+      updateEvaluateButton();
+    }
+
+    function updateEvaluateButton() {
+      els.evaluateBtn.disabled = !state.file || getSelectedModels().length < 2;
+    }
+
+    function handleFile(file) {
+      if (!file) return;
+      const isImage = file.type.startsWith("image/") || /\.(jpg|jpeg|png|bmp|webp)$/i.test(file.name);
+      const isVideo = file.type.startsWith("video/") || /\.(mp4|mov|mkv|webm)$/i.test(file.name);
+      if (!isImage && !isVideo) return showMessage("仅支持图片或视频文件。", "error");
+      if (file.size > 300 * 1024 * 1024) return showMessage("文件过大，请控制在 300MB 以内。", "error");
+
+      if (state.currentObjectUrl) URL.revokeObjectURL(state.currentObjectUrl);
+      state.file = file;
+      state.mediaType = isImage ? "image" : "video";
+      state.currentObjectUrl = URL.createObjectURL(file);
+
+      els.fileMeta.innerHTML = `
+        <div class="meta-item"><span>文件名</span><b>${escapeHtml(file.name)}</b></div>
+        <div class="meta-item"><span>类型</span><b>${state.mediaType === "image" ? "图片 IQA" : "视频 VQA"}</b></div>
+        <div class="meta-item"><span>大小</span><b>${formatBytes(file.size)}</b></div>
+        <div class="meta-item"><span>MIME</span><b>${escapeHtml(file.type || "未知")}</b></div>
+      `;
+      els.taskBadge.textContent = state.mediaType === "image" ? "图片 IQA" : "视频 VQA";
+      els.previewBox.style.display = "flex";
+      if (state.mediaType === "image") {
+        els.videoPreview.hidden = true;
+        els.videoPreview.removeAttribute("src");
+        els.imagePreview.hidden = false;
+        els.imagePreview.src = state.currentObjectUrl;
+      } else {
+        els.imagePreview.hidden = true;
+        els.imagePreview.removeAttribute("src");
+        els.videoPreview.hidden = false;
+        els.videoPreview.src = state.currentObjectUrl;
+      }
+      resetResults();
+      updateEvaluateButton();
+      showMessage("媒体已加载。请选择至少两个模型后开始真实后端评价。", "success");
+    }
+
+    async function checkBackend() {
+      setStatus(els.backendStatus, "检测中", "warn");
+      const base = els.apiBase.value.trim().replace(/\/$/, "");
+      const healthUrl = `${base}/health`;
+      try {
+        const res = await fetch(healthUrl, { method: "GET" });
+        if (res.ok) {
+          setStatus(els.backendStatus, "后端在线", "ok");
+          showMessage("后端 /health 检测成功。", "success");
+        } else {
+          setStatus(els.backendStatus, "可访问", "warn");
+          showMessage("后端可访问，但 /health 未返回 2xx。只要评价接口可用，不影响使用。", "info");
+        }
+      } catch (err) {
+        setStatus(els.backendStatus, "连接失败", "fail");
+        showMessage(`连接失败：${err.message}`, "error");
+      }
+    }
+
+    async function evaluateMultiModel() {
+      const models = getSelectedModels();
+      if (!state.file) return showMessage("请先上传文件。", "error");
+      if (models.length < 2) return showMessage("实验要求两种或以上模型评分，请至少选择 2 个模型。", "error");
+
+      resetResults();
+      setStatus(els.resultStatus, "评价中", "warn");
+      setStatus(els.backendStatus, "评价中", "warn");
+      els.evaluateBtn.disabled = true;
+      els.abortBtn.hidden = false;
+      els.progressWrap.style.display = "block";
+      setProgress(0, "准备逐模型请求");
+      showMessage("正在逐个调用后端真实模型接口。前端不会生成 Mock 分数。", "info");
+
+      const started = performance.now();
+      const debug = [];
+      const results = [];
+      let aborted = false;
+
+      for (let i = 0; i < models.length; i++) {
+        const model = models[i];
+        const startOne = performance.now();
+        setProgress(Math.round((i / models.length) * 100), `正在评价 ${model.label}`);
+        try {
+          const raw = await postEvaluateForModel(model);
+          const elapsed = performance.now() - startOne;
+          debug.push({ request_model: model.backendModel, response: raw });
+          const normalized = normalizeSingleResult(raw, model, elapsed);
+          results.push(normalized);
+        } catch (err) {
+          if (err.name === "AbortError") { aborted = true; break; }
+          results.push({
+            modelId: model.id,
+            modelName: model.label,
+            backendModel: model.backendModel,
+            backbone: model.backbone,
+            task: model.task,
+            dataset: model.dataset,
+            mos: null,
+            normalized: null,
+            latencyMs: null,
+            status: "失败",
+            note: err.message,
+            raw: null
+          });
+          debug.push({ request_model: model.backendModel, error: err.message });
+        }
+        setProgress(Math.round(((i + 1) / models.length) * 100), `已完成 ${i + 1}/${models.length}`);
+      }
+
+      const elapsedTotal = performance.now() - started;
+      els.abortBtn.hidden = true;
+      els.evaluateBtn.disabled = false;
+      state.activeController = null;
+
+      if (aborted) {
+        setStatus(els.resultStatus, "已中止", "fail");
+        showMessage("请求已中止。", "error");
+        return;
+      }
+
+      renderResults(results, elapsedTotal, debug);
+      const successCount = results.filter(r => Number.isFinite(r.mos)).length;
+      if (successCount >= 2) {
+        setStatus(els.resultStatus, "多模型完成", "ok");
+        setStatus(els.backendStatus, "评价成功", "ok");
+        showMessage(`已得到 ${successCount} 个真实后端模型分数，满足“两种或以上模型评分”展示要求。`, "success");
+        addHistory(results, elapsedTotal);
+      } else if (successCount === 1) {
+        setStatus(els.resultStatus, "仅一模型成功", "warn");
+        showMessage("只得到 1 个有效模型分数，不满足“两种或以上模型评分”。请确认后端支持 model 参数并加载两个 checkpoint。", "error");
+      } else {
+        setStatus(els.resultStatus, "评价失败", "fail");
+        setStatus(els.backendStatus, "评价失败", "fail");
+        showMessage("没有得到有效模型分数。请检查后端接口、模型文件和 JSON 返回字段。", "error");
+      }
+    }
+
+    async function postEvaluateForModel(model) {
+      const base = els.apiBase.value.trim().replace(/\/$/, "");
+      const path = normalizePath(els.apiPath.value.trim());
+      const url = `${base}${path}`;
+      const form = new FormData();
+      form.append("file", state.file);
+      form.append("media_type", state.mediaType);
+      form.append("task_type", state.mediaType === "image" ? "iqa" : "vqa");
+      form.append("model", model.backendModel);
+      form.append("model_name", model.backendModel);
+      form.append("backbone", model.backbone);
+      form.append("requested_models", JSON.stringify(getSelectedModels().map(m => m.backendModel)));
+
+      const controller = new AbortController();
+      state.activeController = controller;
+      const res = await fetch(url, { method: "POST", body: form, signal: controller.signal });
+      const text = await res.text();
+      let json;
+      try { json = text ? JSON.parse(text) : {}; }
+      catch { throw new Error(`后端没有返回合法 JSON：${text.slice(0, 160)}`); }
+      if (!res.ok) {
+        const msg = json.detail || json.error || json.message || res.statusText;
+        throw new Error(`HTTP ${res.status}: ${msg}`);
+      }
+      return json;
+    }
+
+    function normalizeSingleResult(response, requestedModel, elapsedMs) {
+      const payload = unwrapPayload(response);
+      const metricSource = payload.metrics || payload.eval_metrics || payload.training_metrics || payload;
+      const score = extractScalarScore(payload);
+      const modelText = pickText(payload, ["model", "model_name", "checkpoint", "version"]);
+      const backboneText = pickText(payload, ["backbone"]);
+      const taskText = pickText(payload, ["task_type", "task", "mode", "media_type"]);
+      const latency = toNumber(payload.inference_ms ?? payload.latency_ms ?? payload.elapsed_ms ?? payload.time_ms) ?? elapsedMs;
+
+      return {
+        modelId: requestedModel.id,
+        modelName: modelText || requestedModel.label,
+        backendModel: requestedModel.backendModel,
+        backbone: backboneText || requestedModel.backbone,
+        task: taskText || requestedModel.task,
+        dataset: requestedModel.dataset,
+        mos: score.mos,
+        normalized: score.normalized,
+        sourceKey: score.sourceKey,
+        latencyMs: latency,
+        metrics: {
+          plcc: toNumber(metricSource.plcc),
+          srocc: toNumber(metricSource.srocc),
+          rmse: toNumber(metricSource.rmse),
+          r2: toNumber(metricSource.r2),
+          mae: toNumber(metricSource.mae),
+          krocc: toNumber(metricSource.krocc)
+        },
+        status: Number.isFinite(score.mos) ? "成功" : "无分数",
+        note: Number.isFinite(score.mos) ? "真实后端返回" : "JSON 中未识别 score / quality_score / mos / overall 字段",
+        raw: response
+      };
+    }
+
+    function unwrapPayload(response) {
+      if (!response || typeof response !== "object") return {};
+      if (response.data && typeof response.data === "object" && !Array.isArray(response.data)) return response.data;
+      if (response.result && typeof response.result === "object" && !Array.isArray(response.result)) return response.result;
+      if (response.prediction && typeof response.prediction === "object" && !Array.isArray(response.prediction)) return response.prediction;
+      return response;
+    }
+
+    function extractScalarScore(payload) {
+      const candidates = [
+        ["mos", payload.mos], ["mos_score", payload.mos_score], ["quality_mos", payload.quality_mos],
+        ["overall_mos", payload.overall_mos], ["overall", payload.overall], ["quality_score", payload.quality_score],
+        ["score", payload.score], ["normalized_score", payload.normalized_score], ["prediction", payload.prediction],
+        ["pred", payload.pred], ["output", payload.output]
+      ];
+      if (payload.scores && typeof payload.scores === "object" && !Array.isArray(payload.scores)) {
+        for (const [key, value] of Object.entries(payload.scores)) candidates.push([`scores.${key}`, value]);
+      }
+      for (const [key, value] of candidates) {
+        const n = toNumber(value);
+        if (n !== null) return scoreFromNumber(n, key);
+      }
+      return { mos: null, normalized: null, sourceKey: "未返回" };
+    }
+
+    function scoreFromNumber(number, key) {
+      const k = String(key).toLowerCase();
+      let mos, normalized;
+      if (k.includes("mos") || (k.includes("overall") && number > 1)) {
+        mos = clamp(number, 0, 5);
+        normalized = mos / 5;
+      } else if (number <= 1.000001) {
+        normalized = clamp(number, 0, 1);
+        mos = normalized * 5;
+      } else {
+        mos = clamp(number, 0, 5);
+        normalized = mos / 5;
+      }
+      return { mos, normalized, sourceKey: key };
+    }
+
+    function renderResults(results, elapsedTotal, debug) {
+      const valid = results.filter(r => Number.isFinite(r.mos));
+      const avg = valid.length ? average(valid.map(r => r.mos)) : null;
+      const best = valid.length ? Math.max(...valid.map(r => r.mos)) : null;
+      els.doneModels.textContent = String(valid.length);
+      els.avgMos.textContent = avg === null ? "--" : formatNumber(avg, 2);
+      els.bestMos.textContent = best === null ? "--" : formatNumber(best, 2);
+      els.totalLatency.textContent = `${formatNumber(elapsedTotal / 1000, 2)}s`;
+      els.rawJson.textContent = JSON.stringify({ file: state.file?.name, media_type: state.mediaType, results, debug }, null, 2);
+
+      els.tableWrap.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>模型</th><th>Backbone / 任务</th><th>MOS</th><th>Normalized</th><th>耗时</th><th>指标</th><th>状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${results.map(row => renderRow(row)).join("")}
+          </tbody>
+        </table>
+      `;
+    }
+
+    function renderRow(row) {
+      const mosText = Number.isFinite(row.mos) ? formatNumber(row.mos, 2) : "--";
+      const normText = Number.isFinite(row.normalized) ? formatNumber(row.normalized, 4) : "--";
+      const width = Number.isFinite(row.normalized) ? `${Math.round(clamp(row.normalized,0,1) * 100)}%` : "0%";
+      const latency = Number.isFinite(row.latencyMs) ? `${formatNumber(row.latencyMs / 1000, 2)}s` : "--";
+      const metrics = row.metrics || {};
+      const metricText = [
+        metrics.plcc !== null && metrics.plcc !== undefined ? `PLCC ${formatNumber(metrics.plcc, 3)}` : null,
+        metrics.srocc !== null && metrics.srocc !== undefined ? `SROCC ${formatNumber(metrics.srocc, 3)}` : null,
+        metrics.rmse !== null && metrics.rmse !== undefined ? `RMSE ${formatNumber(metrics.rmse, 3)}` : null
+      ].filter(Boolean).join(" · ") || "后端未返回";
+      return `
+        <tr>
+          <td><b>${escapeHtml(row.modelName)}</b><div class="small">请求参数：model=${escapeHtml(row.backendModel)}</div></td>
+          <td>${escapeHtml(row.backbone)} / ${escapeHtml(String(row.task).toUpperCase())}<div class="small">${escapeHtml(row.dataset || "")}</div></td>
+          <td><span class="mos">${mosText}</span><span class="small"> /5</span></td>
+          <td><div>${normText}</div><div class="bar"><i style="width:${width}"></i></div><div class="small">来源：${escapeHtml(row.sourceKey || "--")}</div></td>
+          <td>${latency}</td>
+          <td class="small">${escapeHtml(metricText)}</td>
+          <td><b>${escapeHtml(row.status)}</b><div class="small">${escapeHtml(row.note || "")}</div></td>
+        </tr>
+      `;
+    }
+
+    function resetResults() {
+      els.doneModels.textContent = "0";
+      els.avgMos.textContent = "--";
+      els.bestMos.textContent = "--";
+      els.totalLatency.textContent = "--";
+      els.rawJson.textContent = "尚无数据";
+      els.tableWrap.innerHTML = `<div class="empty">上传文件并选择至少两个模型后，点击“开始多模型真实评价”。</div>`;
+      setStatus(els.resultStatus, "等待评价", "warn");
+      els.progressWrap.style.display = "none";
+      setProgress(0, "准备请求");
+    }
+
+    function abortRequests() {
+      if (state.activeController) state.activeController.abort();
+    }
+
+    function addHistory(results, elapsedTotal) {
+      const valid = results.filter(r => Number.isFinite(r.mos));
+      const avg = valid.length ? average(valid.map(r => r.mos)) : null;
+      state.history.unshift({
+        fileName: state.file?.name || "未知文件",
+        mediaType: state.mediaType,
+        time: new Date().toISOString(),
+        models: results.map(r => ({ modelName: r.modelName, backendModel: r.backendModel, mos: r.mos, status: r.status })),
+        avgMos: avg,
+        elapsedTotal
+      });
+      state.history = state.history.slice(0, 15);
+      saveHistory();
+      renderHistory();
+    }
+
+    function loadHistory() {
+      state.history = safeJson(localStorage.getItem(STORAGE_HISTORY), []);
+      renderHistory();
+    }
+
+    function saveHistory() { localStorage.setItem(STORAGE_HISTORY, JSON.stringify(state.history)); }
+
+    function renderHistory() {
+      if (!state.history.length) {
+        els.historyList.innerHTML = `<div class="empty">暂无真实评价记录。</div>`;
+        return;
+      }
+      els.historyList.innerHTML = state.history.map(item => {
+        const date = new Date(item.time).toLocaleString();
+        const modelText = item.models.map(m => `${m.backendModel}:${Number.isFinite(m.mos) ? formatNumber(m.mos,2) : "--"}`).join("，");
+        return `
+          <div class="history-item">
+            <div><strong>${escapeHtml(item.fileName)}</strong><div class="small">${escapeHtml(item.mediaType)} · ${date}<br>${escapeHtml(modelText)}</div></div>
+            <div class="mos">${Number.isFinite(item.avgMos) ? formatNumber(item.avgMos,2) : "--"}</div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function setProgress(percent, text) {
+      const p = clamp(percent, 0, 100);
+      els.progressFill.style.width = `${p}%`;
+      els.progressPercent.textContent = `${Math.round(p)}%`;
+      els.progressText.textContent = text;
+    }
+
+    function setStatus(el, text, type) {
+      el.className = `status-pill ${type === "ok" ? "ok" : type === "fail" ? "fail" : ""}`;
+      el.innerHTML = `<span class="dot"></span>${escapeHtml(text)}`;
+    }
+
+    function showMessage(text, type="info") {
+      els.message.className = `message ${type}`;
+      els.message.textContent = text;
+    }
+
+    function normalizePath(path) {
+      if (!path) return "/evaluate";
+      return path.startsWith("/") ? path : `/${path}`;
+    }
+
+    function pickText(obj, keys) {
+      for (const key of keys) {
+        const value = obj?.[key];
+        if (typeof value === "string" && value.trim()) return value.trim();
+      }
+      return "";
+    }
+
+    function toNumber(value) {
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+      if (typeof value === "string" && value.trim() !== "") {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) return parsed;
+      }
+      if (Array.isArray(value) && value.length === 1) return toNumber(value[0]);
+      return null;
+    }
+
+    function average(nums) { return nums.reduce((a,b) => a + b, 0) / nums.length; }
+    function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
+    function formatNumber(value, digits=2) { return Number(value).toFixed(digits); }
+    function formatBytes(bytes) {
+      if (!Number.isFinite(bytes)) return "--";
+      const units = ["B", "KB", "MB", "GB"];
+      let size = bytes, idx = 0;
+      while (size >= 1024 && idx < units.length - 1) { size /= 1024; idx++; }
+      return `${size.toFixed(idx === 0 ? 0 : 2)} ${units[idx]}`;
+    }
+    function safeJson(text, fallback) { try { return text ? JSON.parse(text) : fallback; } catch { return fallback; } }
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>'"]/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[ch]));
+    }
+  </script>
+</body>
+</html>
