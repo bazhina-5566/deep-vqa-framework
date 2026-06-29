@@ -5,13 +5,10 @@
 
 datasets/
 results/
-api/
-config-bak/
-quarantine/
+api.py
+infer.py
 .download_cache/
 scripts/download_flag
-nohup.out
-checkup.md
 
 
 .venv/
@@ -24,8 +21,6 @@ __pycache__/
 *$py.class
 .pytest_cache/
 .ipynb_checkpoints/
-
-
 
 
 .DS_Store
