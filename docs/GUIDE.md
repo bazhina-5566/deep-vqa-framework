@@ -11,7 +11,7 @@
 | **项目总览** | [docs/GUIDE.md](GUIDE.md) | 当前文档（总入口） |
 | **配置系统** | [config/GUIDE.md](../config/GUIDE.md) | 配置加载、路径管理、数据集与模型配置 |
 | **数据模块** | [src/data/GUIDE.md](../src/data/GUIDE.md) | DataEDA 主模块（加载、划分、预处理） |
-| **EDA 子模块** | [src/data/eda/README.md](../src/data/eda/GUIDE.md) | 数据探索与分析详细说明（integrity、statistics、split、metrics_plotter） |
+| **EDA 子模块** | [src/data/eda/GUIDE.md](../src/data/eda/GUIDE.md) | 数据探索与分析详细说明（integrity、statistics、split、metrics_plotter） |
 | **工具模块** | [src/utils/GUIDE.md](../src/utils/GUIDE.md) | PathManager、日志系统、文件解析器 |
 
 ---
