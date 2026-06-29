@@ -9,7 +9,7 @@ system:
 
 
 
-preprocessing_defaults:
+preprocessing:
     seed: 42
     shuffle: true
     pin_memory: true    # 锁页内存，加速 CPU 到 GPU 的数据传输
@@ -18,7 +18,7 @@ preprocessing_defaults:
 
 
 
-logging_defaults:
+logging:
     log_interval: 10
     save_period: 1
     tensorboard: true
@@ -29,7 +29,7 @@ logging_defaults:
 
 
 
-training_defaults:
+train:
   optimizer: "adamw"
   scheduler: "cosine"
   warmup_epochs: 5
@@ -51,7 +51,7 @@ training_defaults:
 
 
 
-evaluation_defaults:
+evaluation:
   test_after_training: true
   test_best_epoch: true
   save_predictions: true
