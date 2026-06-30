@@ -2,6 +2,7 @@
 **/*.gz
 **/*.zip
 **/*.tar.gz
+**/*.pt
 
 datasets/
 results/
