@@ -39,6 +39,12 @@
     # 手动指定模型（所有文件用同一个）
     uv run python -m deploy.infer -c model.pt -i test.jpg
 
+    # 对比两个模型（ResNet50 vs Swin-T）
+    uv run python -m deploy.infer --compare -i test.jpg
+
+    # 对比模式 + 导出 CSV
+    uv run python -m deploy.infer --compare -i ./test_dir/ --csv results.csv
+
 ============================================================
 快速开始（后端同学看这里）
 ============================================================
@@ -90,6 +96,7 @@
 """
 
 import argparse
+import csv
 import json
 import sys
 from pathlib import Path
@@ -121,35 +128,23 @@ VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".wmv"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}
 
 # ==================== 默认模型路径 ====================
-# 这两个路径是相对 deploy/ 目录的，后端同学只需要把权重文件放到对应位置，
-# 或者改这两个字符串指向实际路径，不需要改其他任何代码。
 DEFAULT_IQA_MODEL = "iqa-models/tid2013_best.pt"
 DEFAULT_VQA_MODEL = "vqa-models/konvid_best.pt"
 
 # ==================== 完整性检查阈值 ====================
-# 以下全部是经验性阈值，不是严格推导得出的，如果实际使用中发现误报/漏报
-# 较多（比如正常视频频繁触发"黑帧比例过高"告警），可以直接调整这里的数值，
-# 不需要改其他逻辑。这些检查全部只产生 warning 日志，不会让推理失败
-# （唯二会真正抛错中断推理的情况是：图片完全无法解码、颜色种类过少）。
-MIN_COLORS = 2                       # 图片颜色种类下限，低于此值判定为无效图片（纯色块等）
-BLACK_FRAME_THRESHOLD = 8.0          # 灰度均值低于此值视为黑帧
-WHITE_FRAME_THRESHOLD = 245.0        # 灰度均值高于此值视为白帧
-BAD_FRAME_DIFF_THRESHOLD = 0.5       # 相邻帧灰度差低于此值视为坏帧（卡顿/花屏/重复帧）
-MAX_BLACK_WHITE_RATIO = 0.3          # 黑/白帧比例超过 30% 触发告警
-MAX_BAD_RATIO = 0.3                  # 坏帧比例超过 30% 触发告警
-MAX_FRAME_DEVIATION = 0.10           # 实际解码帧数与视频声称帧数偏差超过 10% 触发告警
-FRAME_DROP_INTERVAL_THRESHOLD = 1.5  # 帧间隔超过平均间隔的 1.5 倍判定为跳帧
-VIDEO_MEAN_WARNING_THRESHOLD = 0.01  # 整段视频 tensor 均值低于此值视为几乎全黑
+MIN_COLORS = 2
+BLACK_FRAME_THRESHOLD = 8.0
+WHITE_FRAME_THRESHOLD = 245.0
+BAD_FRAME_DIFF_THRESHOLD = 0.5
+MAX_BLACK_WHITE_RATIO = 0.3
+MAX_BAD_RATIO = 0.3
+MAX_FRAME_DEVIATION = 0.10
+FRAME_DROP_INTERVAL_THRESHOLD = 1.5
+VIDEO_MEAN_WARNING_THRESHOLD = 0.01
 
 
 # ==================== 路由函数 ====================
 def detect_media_type(file_path: Union[str, Path]) -> str:
-    """根据文件后缀判断是图片还是视频，用于自动模式下选择对应模型。
-
-    不支持的后缀会直接抛 ValueError。在 main() 的分组逻辑里，单个不支持
-    的文件只会被跳过并打印 warning，不会影响其他文件继续推理；但如果是
-    其他地方单独调用这个函数，调用方需要自己处理这个异常。
-    """
     ext = Path(file_path).suffix.lower()
     if ext in IMAGE_EXTS:
         return "image"
@@ -158,25 +153,44 @@ def detect_media_type(file_path: Union[str, Path]) -> str:
     raise ValueError(f"不支持的文件类型: {ext}")
 
 
+# ==================== 帧采样辅助函数 ====================
+def sample_frames_from_video(video_path: Union[str, Path], num_frames: int = 8) -> List[np.ndarray]:
+    """从视频中均匀采样 num_frames 帧，返回 RGB 帧列表。"""
+    frames = []
+    if DECORD_AVAILABLE:
+        try:
+            vr = VideoReader(str(video_path), ctx=cpu(0))
+            total_frames = len(vr)
+            if total_frames >= num_frames:
+                indices = np.linspace(0, total_frames - 1, num_frames, dtype=int).tolist()
+            else:
+                indices = list(range(total_frames))
+            frames = vr.get_batch(indices).asnumpy()
+            # Decord 输出已经是 RGB，不需要 cvtColor
+            return [f for f in frames]
+        except Exception as e:
+            logger.warning(f"⚠️ Decord 采样失败，回退到 OpenCV: {e}")
+
+    # OpenCV fallback
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        return []
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if total_frames >= num_frames:
+        indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
+    else:
+        indices = range(total_frames)
+    for idx in indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        ret, frame = cap.read()
+        if ret:
+            frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    cap.release()
+    return frames
+
+
 # ==================== Checkpoint 加载 ====================
 def load_checkpoint(checkpoint_path: Union[str, Path], device: str = "cuda") -> Tuple[torch.nn.Module, Dict[str, Any]]:
-    """从 checkpoint 还原模型结构和训练时的完整配置。
-
-    💎 这是个相对耗时的操作（读盘 + 反序列化 + 模型搬到 GPU），如果要做
-    实时服务，必须只在服务启动时调用一次，不能放在每次请求的处理路径里，
-    否则每次推理都会有几秒甚至更久的额外延迟。
-
-    Args:
-        checkpoint_path: .pt 文件路径
-        device: 推理设备
-
-    Returns:
-        (model, config): 模型实例和训练时的 config
-
-    Raises:
-        FileNotFoundError: checkpoint 不存在
-        KeyError: checkpoint 中没有 config 字段
-    """
     ckpt_path = Path(checkpoint_path)
     if not ckpt_path.exists():
         raise FileNotFoundError(f"❌ Checkpoint 不存在: {ckpt_path}")
@@ -206,11 +220,6 @@ def load_checkpoint(checkpoint_path: Union[str, Path], device: str = "cuda") -> 
 
 # ==================== 反归一化 ====================
 def denormalize(score: float, mos_min: Optional[float], mos_max: Optional[float]) -> Optional[float]:
-    """将 [0,1] 归一化分数还原到原始 MOS 尺度。
-
-    mos_min/mos_max 任一缺失都返回 None（而不是报错），调用方需要自己
-    判断 None 的情况，不代表出错，只是该 checkpoint 没保存这组参数。
-    """
     if mos_min is None or mos_max is None:
         return None
     return float(score) * (mos_max - mos_min) + mos_min
@@ -218,25 +227,11 @@ def denormalize(score: float, mos_min: Optional[float], mos_max: Optional[float]
 
 # ==================== 数据预处理 ====================
 class Preprocessor:
-    """
-    单样本预处理器，逻辑与训练时保持一致。
-    同时增加了完整性检查：
-        - 图片：可解码、分辨率有效、非全黑/全白、颜色种类 ≥ 2
-        - 视频：可解码、帧数偏差、黑帧/白帧比例、坏帧比例、跳帧检测
-    """
-
     def __init__(self, num_frames: int = 8, input_size: int = 224):
         self.num_frames = num_frames
         self.input_size = input_size
 
     def process(self, file_path: Union[str, Path]) -> torch.Tensor:
-        """
-        预处理图片或视频文件。
-
-        Returns:
-            图片: Tensor (3, H, W)       -> 后续 unsqueeze(0) 得到 4D [B,3,H,W]
-            视频: Tensor (T, 3, H, W)    -> 后续 unsqueeze(0) 得到 5D [B,F,3,H,W]
-        """
         ext = Path(file_path).suffix.lower()
         if ext in VIDEO_EXTS:
             return self._process_video(file_path)
@@ -245,22 +240,29 @@ class Preprocessor:
         else:
             raise ValueError(f"❌ 不支持的文件类型: {ext}")
 
-    # ==================== 视频处理 ====================
+    def process_image_from_array(self, image_np: np.ndarray) -> torch.Tensor:
+        """从 numpy 数组处理图片（用于视频抽帧后的逐帧推理）"""
+        if image_np is None:
+            raise ValueError("图像数据为空")
+        # 确保是 RGB
+        if image_np.shape[-1] == 3 and image_np.dtype == np.uint8:
+            resized = cv2.resize(image_np, (self.input_size, self.input_size))
+            return torch.from_numpy(resized).permute(2, 0, 1).float() / 255.0
+        else:
+            raise ValueError(f"不支持的图像格式: shape={image_np.shape}, dtype={image_np.dtype}")
+
     def _process_video(self, file_path: Union[str, Path]) -> torch.Tensor:
-        """视频预处理 + 完整性检查（优先 Decord，失败回退 OpenCV）"""
         if DECORD_AVAILABLE:
             try:
                 vr = VideoReader(str(file_path), ctx=cpu(0))
                 total_frames = len(vr)
 
-                # ========== 1. 帧数偏差检查 ==========
                 claimed_frames = self._get_claimed_frame_count(str(file_path))
                 if claimed_frames > 0:
                     deviation = abs(total_frames - claimed_frames) / max(claimed_frames, 1)
                     if deviation > MAX_FRAME_DEVIATION:
                         logger.warning(f"⚠️ 帧数偏差 {deviation*100:.1f}%（声称={claimed_frames}, 实际={total_frames}）")
 
-                # ========== 2. 采样帧 ==========
                 if total_frames >= self.num_frames:
                     indices = np.linspace(0, total_frames - 1, self.num_frames, dtype=int).tolist()
                 else:
@@ -270,7 +272,6 @@ class Preprocessor:
                 if frames.size == 0:
                     raise ValueError(f"Decord 返回了空帧序列: {file_path}")
 
-                # ========== 3. 跳帧检测（基于时间戳间隔） ==========
                 timestamps = self._get_frame_timestamps(vr, indices)
                 if len(timestamps) > 2:
                     intervals = np.diff(timestamps)
@@ -279,7 +280,6 @@ class Preprocessor:
                     if max_interval > mean_interval * FRAME_DROP_INTERVAL_THRESHOLD:
                         logger.warning(f"⚠️ 检测到跳帧: max间隔={max_interval:.1f}ms, mean间隔={mean_interval:.1f}ms")
 
-                # ========== 4. 黑帧/白帧/坏帧检测 ==========
                 frame_stats = self._analyze_frames(frames)
                 total = len(frames)
                 black_ratio = frame_stats["black"] / max(total, 1)
@@ -293,11 +293,9 @@ class Preprocessor:
                 if bad_ratio > MAX_BAD_RATIO:
                     logger.warning(f"⚠️ 坏帧比例过高: {bad_ratio*100:.1f}%")
 
-                # ========== 5. 解码帧数不足 ==========
                 if len(frames) < self.num_frames:
                     logger.warning(f"⚠️ 帧数不足 {len(frames)}/{self.num_frames}，将用最后一帧填充")
 
-                # ========== 6. 预处理 ==========
                 resized = [cv2.resize(f, (self.input_size, self.input_size)) for f in frames]
                 video_np = np.stack(resized)
                 tensor = torch.from_numpy(video_np).permute(0, 3, 1, 2).float() / 255.0
@@ -306,7 +304,6 @@ class Preprocessor:
                     pad = tensor[-1].unsqueeze(0).repeat(self.num_frames - tensor.size(0), 1, 1, 1)
                     tensor = torch.cat([tensor, pad], dim=0)
 
-                # ========== 7. 全黑视频检测 ==========
                 if tensor.mean() < VIDEO_MEAN_WARNING_THRESHOLD:
                     logger.warning(f"⚠️ 视频几乎全黑: {file_path}")
 
@@ -318,7 +315,6 @@ class Preprocessor:
         return self._process_video_opencv(file_path)
 
     def _process_video_opencv(self, file_path: Union[str, Path]) -> torch.Tensor:
-        """OpenCV 备用视频读取 + 完整性检查，逻辑与 Decord 分支保持一致"""
         cap = cv2.VideoCapture(str(file_path))
         if not cap.isOpened():
             raise ValueError(f"❌ 无法打开视频: {file_path}")
@@ -383,7 +379,6 @@ class Preprocessor:
         return tensor
 
     def _get_claimed_frame_count(self, file_path: str) -> int:
-        """获取视频文件元数据里声称的帧数，用于和实际解码帧数对比"""
         try:
             cap = cv2.VideoCapture(file_path)
             if cap.isOpened():
@@ -394,12 +389,6 @@ class Preprocessor:
             return 0
 
     def _get_frame_timestamps(self, vr, indices) -> List[float]:
-        """获取帧时间戳（毫秒），仅用于跳帧检测这个辅助性告警逻辑。
-
-        vr.get_frame_timestamp 在部分视频编码格式下可能不可用或报错，
-        这种情况下 fallback 假设固定 30fps（33.33ms/帧）来估算时间戳，
-        估算误差不影响推理结果本身，只可能让跳帧告警不够精确。
-        """
         timestamps = []
         for idx in indices:
             try:
@@ -410,7 +399,6 @@ class Preprocessor:
         return timestamps
 
     def _analyze_frames(self, frames) -> Dict[str, int]:
-        """分析帧序列：黑帧、白帧、坏帧（相邻帧几乎无变化，可能是卡顿/重复帧）"""
         stats = {"black": 0, "white": 0, "bad": 0}
         prev_gray = None
 
@@ -433,14 +421,7 @@ class Preprocessor:
 
         return stats
 
-    # ==================== 图片处理 ====================
     def _process_image(self, file_path: Union[str, Path]) -> torch.Tensor:
-        """
-        图片预处理 + 完整性检查。
-
-        💎 这里抛出的 ValueError（解码失败/无效分辨率/颜色种类过少）是
-        整个脚本里真正会中断单次推理的异常，api.py 必须 try/except 接住。
-        """
         img = cv2.imread(str(file_path))
         if img is None:
             raise ValueError(f"❌ 图像解码失败: {file_path}")
@@ -465,6 +446,82 @@ class Preprocessor:
         return torch.from_numpy(img_resized).permute(2, 0, 1).float() / 255.0
 
 
+# ==================== 图片转伪视频 ====================
+def image_to_video_tensor(image_tensor: torch.Tensor, num_frames: int = 8) -> torch.Tensor:
+    """将单张图片 Tensor (3, H, W) 复制成伪视频 (T, 3, H, W)"""
+    return image_tensor.unsqueeze(0).repeat(num_frames, 1, 1, 1)
+
+
+# ==================== ResNet 风格推理 ====================
+def predict_with_resnet_style(
+    model: torch.nn.Module,
+    file_path: Union[str, Path],
+    config: Dict[str, Any],
+    device: str = "cuda",
+    mos_min: Optional[float] = None,
+    mos_max: Optional[float] = None,
+) -> Dict[str, Any]:
+    """专为 ResNet 类模型设计的推理（图片直接推，视频抽帧平均）"""
+    num_frames = config.get("model", {}).get("num_frames", 8)
+    input_size = config.get("model", {}).get("input_size", 224)
+    preprocessor = Preprocessor(num_frames=num_frames, input_size=input_size)
+
+    media_type = detect_media_type(file_path)
+
+    if media_type == "image":
+        # 图片直接推理
+        data_tensor = preprocessor._process_image(file_path).unsqueeze(0).to(device)
+        with torch.no_grad():
+            output = model(data_tensor).float()
+            if output.ndim > 1 and output.size(-1) == 1:
+                output = output.squeeze(-1)
+            raw_score = float(output.flatten()[0].cpu().item())
+
+        if mos_min is None or mos_max is None:
+            dataset_info = config.get("dataset_info", {}) or {}
+            mos_min = mos_min if mos_min is not None else dataset_info.get("mos_min")
+            mos_max = mos_max if mos_max is not None else dataset_info.get("mos_max")
+        real_score = denormalize(raw_score, mos_min, mos_max)
+
+        return {
+            "file": str(file_path),
+            "raw_score": round(raw_score, 6),
+            "mos_score": round(real_score, 4) if real_score is not None else None,
+            "task_type": config.get("task_type", "iqa"),
+            "model_name": config.get("model", {}).get("name", "ResNet-style"),
+        }
+
+    else:  # 视频 → 抽帧逐帧推理取平均
+        frames = sample_frames_from_video(file_path, num_frames)
+        if not frames:
+            raise ValueError("无法采样视频帧")
+
+        scores = []
+        for frame_np in frames:
+            # 用 Preprocessor 处理单帧
+            tensor = preprocessor.process_image_from_array(frame_np).unsqueeze(0).to(device)
+            with torch.no_grad():
+                out = model(tensor).float()
+                if out.ndim > 1 and out.size(-1) == 1:
+                    out = out.squeeze(-1)
+                scores.append(float(out.flatten()[0].cpu().item()))
+
+        avg_raw = sum(scores) / len(scores)
+        if mos_min is None or mos_max is None:
+            dataset_info = config.get("dataset_info", {}) or {}
+            mos_min = mos_min if mos_min is not None else dataset_info.get("mos_min")
+            mos_max = mos_max if mos_max is not None else dataset_info.get("mos_max")
+        real_score = denormalize(avg_raw, mos_min, mos_max)
+
+        return {
+            "file": str(file_path),
+            "raw_score": round(avg_raw, 6),
+            "mos_score": round(real_score, 4) if real_score is not None else None,
+            "task_type": config.get("task_type", "iqa"),
+            "model_name": config.get("model", {}).get("name", "ResNet-style"),
+        }
+
+
 # ==================== 批量推理核心 ====================
 @torch.no_grad()
 def predict_single(
@@ -475,25 +532,7 @@ def predict_single(
     mos_min: Optional[float] = None,
     mos_max: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """
-    对单个文件（图片或视频）进行推理。
-
-    💎 这是 api.py 接入时最主要会用到的函数，返回字段说明：
-        file        : 输入文件路径（原样返回，便于前端对照）
-        raw_score   : 模型输出的原始分数，范围 [0,1]，始终存在
-        mos_score   : 反归一化回原始 MOS 量纲的分数；如果 checkpoint 没保存
-                      mos_min/mos_max 且调用时也没手动传，这里会是 None，
-                      不代表推理出错，只是没法换算成业务可读的分数
-        task_type   : "iqa" 或 "vqa"，可用于前端展示口径
-        model_name  : 模型结构名（来自 config["model"]["name"]）
-
-    💎 注意：这个函数不会捕获异常，文件解码失败/格式不支持会直接抛
-       ValueError 往上传，调用方（api.py）必须自己 try/except，
-       建议接住后返回明确的"文件无效"错误，而不是裸的 500。
-
-    💎 如果要做实时单文件接口，直接复用这个函数即可；model/config 只需要
-       在服务启动时通过 load_checkpoint 加载一次，不要在这里重复加载。
-    """
+    """对单个文件（图片或视频）进行推理。"""
     num_frames = config.get("model", {}).get("num_frames", 8)
     input_size = config.get("model", {}).get("input_size", 224)
 
@@ -531,16 +570,7 @@ def predict_batch(
     mos_min: Optional[float] = None,
     mos_max: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
-    """
-    批量推理多个文件，用于离线打分场景。
-
-    💎 跟 predict_single 不同：这个函数内部吃掉了所有异常，单个文件失败
-       不会中断整批推理，失败的文件在返回列表里会是
-       {"file": "...", "error": "错误信息"} 而不是抛异常。
-       如果是做"实时单文件接口"，应该直接用 predict_single（会抛异常，
-       便于 api.py 统一处理成 HTTP 错误码）；如果是"批量离线打分"
-       场景，才用这个。
-    """
+    """批量推理多个文件，用于离线打分场景。"""
     results = []
     for path in input_paths:
         try:
@@ -549,6 +579,91 @@ def predict_batch(
             logger.error(f"🚨 推理失败: {path} | {e}")
             results.append({"file": str(path), "error": str(e)})
     return results
+
+
+# ==================== 对比两个模型 ====================
+def compare_models(
+    file_path: Union[str, Path],
+    iqa_model: torch.nn.Module,
+    vqa_model: torch.nn.Module,
+    iqa_config: Dict[str, Any],
+    vqa_config: Dict[str, Any],
+    device: str = "cuda",
+    iqa_mos_min: Optional[float] = None,
+    iqa_mos_max: Optional[float] = None,
+    vqa_mos_min: Optional[float] = None,
+    vqa_mos_max: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    对比两个模型在同一输入上的表现。
+    返回结果中包含两个模型的分数及结构化的 delta。
+    """
+    media_type = detect_media_type(file_path)
+    result = {"file": str(file_path), "media_type": media_type}
+
+    # IQA 模型（ResNet 类）
+    result["iqa"] = predict_with_resnet_style(
+        iqa_model, file_path, iqa_config, device, iqa_mos_min, iqa_mos_max
+    )
+
+    # VQA 模型（Swin-T 类）
+    result["vqa"] = predict_single(
+        vqa_model, file_path, vqa_config, device, vqa_mos_min, vqa_mos_max
+    )
+
+    # 结构化 delta
+    delta = {}
+    if "raw_score" in result["iqa"] and "raw_score" in result["vqa"]:
+        delta["raw_score"] = round(
+            result["vqa"]["raw_score"] - result["iqa"]["raw_score"], 6
+        )
+    else:
+        delta["raw_score"] = None
+
+    if "mos_score" in result["iqa"] and "mos_score" in result["vqa"]:
+        iqa_mos = result["iqa"]["mos_score"]
+        vqa_mos = result["vqa"]["mos_score"]
+        if iqa_mos is not None and vqa_mos is not None:
+            delta["mos_score"] = round(vqa_mos - iqa_mos, 4)
+        else:
+            delta["mos_score"] = None
+    else:
+        delta["mos_score"] = None
+
+    result["delta"] = delta
+
+    return result
+
+
+# ==================== CSV 导出 ====================
+def export_compare_to_csv(results: List[Dict[str, Any]], csv_path: Path):
+    """将对比结果导出为 CSV"""
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "filename", "media_type",
+            "iqa_raw", "iqa_mos",
+            "vqa_raw", "vqa_mos",
+            "delta_raw", "delta_mos"
+        ])
+        for r in results:
+            if "error" in r:
+                continue
+            iqa = r.get("iqa", {})
+            vqa = r.get("vqa", {})
+            delta = r.get("delta", {})
+            writer.writerow([
+                r.get("file", ""),
+                r.get("media_type", ""),
+                iqa.get("raw_score", ""),
+                iqa.get("mos_score", ""),
+                vqa.get("raw_score", ""),
+                vqa.get("mos_score", ""),
+                delta.get("raw_score", ""),
+                delta.get("mos_score", ""),
+            ])
+    logger.info(f"💾 CSV 已导出: {csv_path}")
 
 
 # ==================== CLI 入口 ====================
@@ -567,6 +682,12 @@ def main():
 
   # 手动指定统一模型
   uv run python -m deploy.infer -c model.pt -i test.jpg
+
+  # 对比两个模型（ResNet50 vs Swin-T）
+  uv run python -m deploy.infer --compare -i test.jpg
+
+  # 对比模式 + 导出 CSV
+  uv run python -m deploy.infer --compare -i ./test_dir/ --csv results.csv
 """
     )
     parser.add_argument("-c", "--checkpoint", type=str, default=None, help="模型路径 (可选，不指定则自动选择)")
@@ -575,7 +696,25 @@ def main():
     parser.add_argument("--mos_min", type=float, default=None, help="反归一化下限")
     parser.add_argument("--mos_max", type=float, default=None, help="反归一化上限")
     parser.add_argument("-o", "--output", type=str, default=None, help="结果 JSON 输出路径")
+    parser.add_argument("--csv", type=str, default=None, help="对比模式下导出 CSV 结果")
     parser.add_argument("--cpu", action="store_true", help="强制使用 CPU")
+    parser.add_argument(
+        "--compare",
+        action="store_true",
+        help="对比 ResNet50 和 Swin-T 两个模型的表现"
+    )
+    parser.add_argument(
+        "--iqa-ckpt",
+        type=str,
+        default=None,
+        help="对比模式下 IQA 模型路径（覆盖默认 iqa-models/tid2013_best.pt）"
+    )
+    parser.add_argument(
+        "--vqa-ckpt",
+        type=str,
+        default=None,
+        help="对比模式下 VQA 模型路径（覆盖默认 vqa-models/konvid_best.pt）"
+    )
     args = parser.parse_args()
 
     if args.cpu:
@@ -596,7 +735,7 @@ def main():
         logger.error(f"❌ 在 {input_path} 没有找到任何支持的图片/视频文件")
         sys.exit(1)
 
-    # 按类型分组：图片和视频用不同模型，混合目录场景下避免用错模型推理
+    # 按类型分组
     image_files, video_files = [], []
     for f in targets:
         ext = f.suffix.lower()
@@ -609,15 +748,52 @@ def main():
 
     results = []
 
-    if args.checkpoint:
-        # 手动模式：用户明确指定了一个模型，不管文件是图片还是视频，
-        # 全部丢给这一个模型推理。
-        # 💎 注意：如果传入的模型跟文件类型不匹配（比如拿 VQA 模型推图片），
-        # 不会有任何拦截，会直接喂给 model() 调用，可能因为 4D/5D 维度不
-        # 匹配而在 forward 内部报错，或者更糟——如果某天模型对两种维度
-        # 都不报错，会跑出语义上完全错误但形式上"正常"的分数。所以手动
-        # 指定模型时，使用者要自己确保模型和文件类型对得上，不确定的话
-        # 优先用下面的自动模式。
+    if args.compare:
+        # 对比模式
+        logger.info("🔍 对比模式：加载 IQA 和 VQA 两个模型")
+
+        iqa_path = Path(args.iqa_ckpt) if args.iqa_ckpt else (_DEPLOY_ROOT / DEFAULT_IQA_MODEL)
+        vqa_path = Path(args.vqa_ckpt) if args.vqa_ckpt else (_DEPLOY_ROOT / DEFAULT_VQA_MODEL)
+
+        if not iqa_path.exists():
+            logger.error(f"❌ IQA 模型不存在: {iqa_path}")
+            sys.exit(1)
+        if not vqa_path.exists():
+            logger.error(f"❌ VQA 模型不存在: {vqa_path}")
+            sys.exit(1)
+
+        logger.info(f"   IQA 模型: {iqa_path}")
+        logger.info(f"   VQA 模型: {vqa_path}")
+
+        iqa_model, iqa_config = load_checkpoint(iqa_path, device=args.device)
+        vqa_model, vqa_config = load_checkpoint(vqa_path, device=args.device)
+
+        all_files = image_files + video_files
+        for f in all_files:
+            try:
+                result = compare_models(
+                    f,
+                    iqa_model,
+                    vqa_model,
+                    iqa_config,
+                    vqa_config,
+                    device=args.device,
+                    iqa_mos_min=args.mos_min,
+                    iqa_mos_max=args.mos_max,
+                    vqa_mos_min=args.mos_min,
+                    vqa_mos_max=args.mos_max,
+                )
+                results.append(result)
+            except Exception as e:
+                logger.error(f"🚨 对比推理失败: {f} | {e}")
+                results.append({"file": str(f), "error": str(e)})
+
+        # 导出 CSV
+        if args.csv:
+            export_compare_to_csv(results, Path(args.csv))
+
+    elif args.checkpoint:
+        # 手动模式
         model_path = Path(args.checkpoint)
         if not model_path.exists():
             logger.error(f"❌ 模型不存在: {model_path}")
@@ -627,8 +803,7 @@ def main():
         if all_files:
             results = predict_batch(model, all_files, config, args.device, args.mos_min, args.mos_max)
     else:
-        # 自动模式（推荐）：按文件后缀自动分组，图片用 IQA 模型，
-        # 视频用 VQA 模型，分别加载分别推理，不会出现类型不匹配的问题。
+        # 自动模式
         if image_files:
             iqa_path = _DEPLOY_ROOT / DEFAULT_IQA_MODEL
             if not iqa_path.exists():
@@ -657,8 +832,16 @@ def main():
         if "error" in r:
             logger.error(f"  ❌ {r['file']}: {r['error']}")
         else:
-            mos_str = f"{r['mos_score']:.4f}" if r["mos_score"] is not None else "N/A"
-            logger.info(f"  ✅ {r['file']}: raw={r['raw_score']:.4f} | mos={mos_str}")
+            if "iqa" in r and "vqa" in r:
+                logger.info(f"  📊 {r['file']} (对比模式):")
+                logger.info(f"      ResNet50 (IQA): raw={r['iqa']['raw_score']:.4f} | mos={r['iqa']['mos_score']}")
+                logger.info(f"      Swin-T (VQA):  raw={r['vqa']['raw_score']:.4f} | mos={r['vqa']['mos_score']}")
+                delta = r.get("delta", {})
+                if delta.get("raw_score") is not None:
+                    logger.info(f"      Delta (VQA - IQA): raw={delta['raw_score']:+.4f} | mos={delta['mos_score']:+.4f}")
+            else:
+                mos_str = f"{r['mos_score']:.4f}" if r.get("mos_score") is not None else "N/A"
+                logger.info(f"  ✅ {r['file']}: raw={r['raw_score']:.4f} | mos={mos_str}")
     logger.info("=" * 60)
 
     if args.output:
